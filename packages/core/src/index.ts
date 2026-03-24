@@ -1,6 +1,10 @@
 import {
   type ActionState,
   type AgentAction,
+  type AgentEvent,
+  type ConversationMessage,
+  type PendingInteraction,
+  type PlanStep,
   type RuntimeSnapshot,
   type SessionState,
 } from "@ezu/protocol";
@@ -62,6 +66,196 @@ export function createSessionState(input: Pick<SessionState, "id" | "projectId">
     runtime: createEmptyRuntimeSnapshot(),
     createdAt: timestamp,
     updatedAt: timestamp,
+  };
+}
+
+function upsertMessage(
+  messages: ConversationMessage[],
+  nextMessage: ConversationMessage,
+): ConversationMessage[] {
+  const index = messages.findIndex((message) => message.id === nextMessage.id);
+
+  if (index === -1) {
+    return [...messages, nextMessage];
+  }
+
+  return messages.map((message, currentIndex) =>
+    currentIndex === index ? nextMessage : message,
+  );
+}
+
+function upsertAction(actions: ActionState[], nextAction: ActionState): ActionState[] {
+  const index = actions.findIndex((action) => action.id === nextAction.id);
+
+  if (index === -1) {
+    return [...actions, nextAction];
+  }
+
+  return actions.map((action, currentIndex) => (currentIndex === index ? nextAction : action));
+}
+
+function createAssistantMessage(id: string, text: string): ConversationMessage {
+  return {
+    id,
+    role: "assistant",
+    content: text,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+function interactionFromAction(action: AgentAction): PendingInteraction | undefined {
+  if (action.type === "interaction.choice") {
+    return {
+      type: "choice",
+      id: crypto.randomUUID(),
+      question: action.question,
+      options: action.options,
+    };
+  }
+
+  if (action.type === "interaction.confirm") {
+    return {
+      type: "confirm",
+      id: crypto.randomUUID(),
+      title: action.title,
+      summary: action.summary,
+    };
+  }
+
+  return undefined;
+}
+
+export function applyAgentEvent(session: SessionState, event: AgentEvent): SessionState {
+  const updatedAt = new Date().toISOString();
+
+  if (event.type === "message.delta") {
+    const existing =
+      session.messages.find((message) => message.id === event.messageId) ??
+      createAssistantMessage(event.messageId, "");
+
+    return {
+      ...session,
+      messages: upsertMessage(session.messages, {
+        ...existing,
+        content: `${existing.content}${event.text}`,
+        timestamp: updatedAt,
+      }),
+      updatedAt,
+    };
+  }
+
+  if (event.type === "message.completed") {
+    return {
+      ...session,
+      updatedAt,
+    };
+  }
+
+  if (event.type === "plan.updated") {
+    return {
+      ...session,
+      plan: event.plan,
+      updatedAt,
+    };
+  }
+
+  if (event.type === "action.created") {
+    return {
+      ...session,
+      actions: upsertAction(session.actions, event.action),
+      pendingInteraction:
+        interactionFromAction(event.action.action) ?? session.pendingInteraction,
+      updatedAt,
+    };
+  }
+
+  if (event.type === "action.updated") {
+    return {
+      ...session,
+      actions: upsertAction(session.actions, event.action),
+      pendingInteraction:
+        interactionFromAction(event.action.action) ?? session.pendingInteraction,
+      updatedAt,
+    };
+  }
+
+  if (event.type === "interaction.required") {
+    return {
+      ...session,
+      pendingInteraction: event.interaction,
+      updatedAt,
+    };
+  }
+
+  if (event.type === "file.changed") {
+    const nextFiles = new Set(session.runtime.files);
+    nextFiles.add(event.path);
+
+    return {
+      ...session,
+      runtime: {
+        ...session.runtime,
+        files: [...nextFiles].sort(),
+      },
+      updatedAt,
+    };
+  }
+
+  if (event.type === "preview.ready") {
+    const remainingPorts = session.runtime.openPorts.filter((port) => port.port !== event.port);
+
+    return {
+      ...session,
+      runtime: {
+        ...session.runtime,
+        openPorts: [
+          ...remainingPorts,
+          { port: event.port, url: event.url, status: "open" },
+        ].sort((left, right) => left.port - right.port),
+      },
+      updatedAt,
+    };
+  }
+
+  return {
+    ...session,
+    updatedAt,
+  };
+}
+
+export async function collectEventStream(
+  session: SessionState,
+  stream: AsyncIterable<AgentEvent>,
+): Promise<{ session: SessionState; events: AgentEvent[] }> {
+  const events: AgentEvent[] = [];
+  let nextSession = session;
+
+  for await (const event of stream) {
+    events.push(event);
+    nextSession = applyAgentEvent(nextSession, event);
+  }
+
+  return {
+    session: nextSession,
+    events,
+  };
+}
+
+export function createPlanStep(input: {
+  id?: string;
+  title: string;
+  description?: string;
+  status?: PlanStep["status"];
+  requiresApproval?: boolean;
+}): PlanStep {
+  return {
+    id: input.id ?? crypto.randomUUID(),
+    title: input.title,
+    status: input.status ?? "pending",
+    ...(input.description ? { description: input.description } : {}),
+    ...(input.requiresApproval !== undefined
+      ? { requiresApproval: input.requiresApproval }
+      : {}),
   };
 }
 

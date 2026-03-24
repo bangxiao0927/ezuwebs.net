@@ -1,4 +1,6 @@
 import {
+  applyAgentEvent,
+  collectEventStream,
   createExecutor,
   createSessionState,
   createSessionStore,
@@ -15,7 +17,7 @@ export interface AgentAppOptions {
 
 export async function bootstrapAgentApp(options: AgentAppOptions): Promise<AgentEvent[]> {
   const sessionStore = createSessionStore();
-  const session = createSessionState({
+  let session = createSessionState({
     id: options.sessionId,
     projectId: options.projectId,
   });
@@ -25,27 +27,102 @@ export async function bootstrapAgentApp(options: AgentAppOptions): Promise<Agent
   const gateway = createModelGateway();
   const runtime = createBrowserRuntimeStub();
   const executor = createExecutor({ runtime, sessionStore });
+  const { session: plannedSession, events } = await collectEventStream(
+    session,
+    gateway.streamPlan({
+      prompt: "Initialize the workspace code structure for the new AI IDE.",
+    }),
+  );
 
-  const plannedAction = createTimelineAction({
-    source: "planner",
+  session = plannedSession;
+  sessionStore.upsert(session);
+
+  const fileAction = createTimelineAction({
+    source: "coder",
     action: {
-      type: "interaction.confirm",
-      title: "Review initial workspace structure",
-      summary: "Confirm the generated monorepo layout before wiring real runtime and UI.",
+      type: "file.write",
+      path: "apps/web/src/generated-bootstrap.ts",
+      content: [
+        "export const generatedBootstrap = {",
+        "  status: 'ready',",
+        "  source: 'agent-demo',",
+        "};",
+      ].join("\n"),
     },
   });
 
-  const executed = await executor.enqueue(plannedAction);
+  const previewAction = createTimelineAction({
+    source: "system",
+    action: {
+      type: "preview.open",
+      port: 4173,
+    },
+  });
 
-  return [
-    {
-      type: "message.delta",
-      messageId: "bootstrap",
-      text: `Planner profile: ${gateway.getProfile().planning.model}`,
+  const createdFileEvent: AgentEvent = {
+    type: "action.created",
+    action: fileAction,
+  };
+  events.push(createdFileEvent);
+  session = applyAgentEvent(session, createdFileEvent);
+
+  const completedFileAction = await executor.enqueue(fileAction);
+  const updatedFileEvent: AgentEvent = {
+    type: "action.updated",
+    action: completedFileAction,
+  };
+  events.push(updatedFileEvent);
+  session = applyAgentEvent(session, updatedFileEvent);
+
+  const fileChangedEvent: AgentEvent = {
+    type: "file.changed",
+    path: fileAction.action.path,
+  };
+  events.push(fileChangedEvent);
+  session = applyAgentEvent(session, fileChangedEvent);
+
+  const createdPreviewEvent: AgentEvent = {
+    type: "action.created",
+    action: previewAction,
+  };
+  events.push(createdPreviewEvent);
+  session = applyAgentEvent(session, createdPreviewEvent);
+
+  const completedPreviewEvent: AgentEvent = {
+    type: "action.updated",
+    action: {
+      ...previewAction,
+      status: "completed",
+      updatedAt: new Date().toISOString(),
     },
-    {
-      type: "action.created",
-      action: executed,
-    },
-  ];
+  };
+  events.push(completedPreviewEvent);
+  session = applyAgentEvent(session, completedPreviewEvent);
+
+  const previewReadyEvent: AgentEvent = {
+    type: "preview.ready",
+    url: "http://localhost:4173",
+    port: 4173,
+  };
+  events.push(previewReadyEvent);
+  session = applyAgentEvent(session, previewReadyEvent);
+
+  const profileMessageEvent: AgentEvent = {
+    type: "message.delta",
+    messageId: "bootstrap-profile",
+    text: `Planner profile: ${gateway.getProfile().planning.model}`,
+  };
+  events.push(profileMessageEvent);
+  session = applyAgentEvent(session, profileMessageEvent);
+
+  const profileCompletedEvent: AgentEvent = {
+    type: "message.completed",
+    messageId: "bootstrap-profile",
+  };
+  events.push(profileCompletedEvent);
+  session = applyAgentEvent(session, profileCompletedEvent);
+
+  sessionStore.upsert(session);
+
+  return events;
 }

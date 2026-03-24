@@ -48,14 +48,54 @@ export function createModelGateway(profile: ModelProfile = defaultModelProfile):
       return profile;
     },
     async *streamPlan(input) {
+      const messageId = crypto.randomUUID();
+
       yield {
         type: "message.delta",
-        messageId: "planner",
-        text: input.prompt,
+        messageId,
+        text: "I am outlining the first-pass workspace initialization flow.",
+      };
+      yield {
+        type: "message.delta",
+        messageId,
+        text: ` Request: ${input.prompt}`,
+      };
+      yield {
+        type: "plan.updated",
+        plan: [
+          {
+            id: crypto.randomUUID(),
+            title: "Define the app and package boundaries",
+            description: "Pin the web, agent, protocol, runtime, and UI ownership.",
+            status: "completed",
+          },
+          {
+            id: crypto.randomUUID(),
+            title: "Scaffold a first file-level action",
+            description: "Write a bootstrap file through the runtime adapter.",
+            status: "in_progress",
+          },
+          {
+            id: crypto.randomUUID(),
+            title: "Expose the resulting state to the web workbench",
+            description: "Reduce events into chat, plan, files, timeline, and preview state.",
+            status: "pending",
+            requiresApproval: false,
+          },
+        ],
+      };
+      yield {
+        type: "interaction.required",
+        interaction: {
+          type: "confirm",
+          id: crypto.randomUUID(),
+          title: "Proceed with the initial scaffold action",
+          summary: "The demo flow will write a generated bootstrap file and publish a preview event.",
+        },
       };
       yield {
         type: "message.completed",
-        messageId: "planner",
+        messageId,
       };
     },
     async *streamCode(input) {
