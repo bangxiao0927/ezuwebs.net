@@ -16,6 +16,7 @@ export interface WebAppBootstrap {
   initialEvents: AgentEvent[];
   sessionId: string;
   projectId: string;
+  webEditor?: Partial<InteractiveWebEditorState>;
 }
 
 export interface WorkbenchViewModel {
@@ -25,6 +26,7 @@ export interface WorkbenchViewModel {
   pendingInteraction: WebAppEventState["pendingInteraction"];
   files: string[];
   previews: WebAppEventState["runtime"]["openPorts"];
+  webEditor: InteractiveWebEditorState;
 }
 
 export interface WebAppEventState {
@@ -33,6 +35,44 @@ export interface WebAppEventState {
   actions: ReturnType<typeof createSessionState>["actions"];
   pendingInteraction: ReturnType<typeof createSessionState>["pendingInteraction"];
   runtime: ReturnType<typeof createSessionState>["runtime"];
+}
+
+export interface WebEditorBlock {
+  id: string;
+  label: string;
+  selector: string;
+  html: string;
+  notes?: string;
+}
+
+export interface WebEditorProperty {
+  key: string;
+  label: string;
+  value: string;
+}
+
+export interface WebEditorSelection {
+  blockId: string;
+  path: string;
+}
+
+export interface InteractiveWebEditorState {
+  selectedBlockId?: string;
+  blocks: WebEditorBlock[];
+  properties: WebEditorProperty[];
+  lastIntent?: string;
+}
+
+export interface InteractiveWebEditRequest {
+  selection: WebEditorSelection;
+  intent: string;
+  patchStrategy: "replace" | "append" | "refine";
+  properties?: WebEditorProperty[];
+}
+
+export interface InteractiveWebEditResponse {
+  nextState: InteractiveWebEditorState;
+  suggestedPrompt: string;
 }
 
 export function reduceWorkbenchEvents(
@@ -69,6 +109,94 @@ export function createWorkbenchViewModel(input: WebAppBootstrap): WorkbenchViewM
     pendingInteraction: state.pendingInteraction,
     files: state.runtime.files,
     previews: state.runtime.openPorts,
+    webEditor: createInteractiveWebEditorState(input.webEditor),
+  };
+}
+
+export function createInteractiveWebEditorState(
+  overrides: Partial<InteractiveWebEditorState> = {},
+): InteractiveWebEditorState {
+  const blocks =
+    overrides.blocks ??
+    [
+      {
+        id: "hero",
+        label: "Hero Banner",
+        selector: "main > header.topbar",
+        html: "<header class='topbar'>...</header>",
+        notes: "Primary workspace identity, title, and runtime context.",
+      },
+      {
+        id: "conversation",
+        label: "Conversation Stack",
+        selector: "section.layout > section:nth-of-type(1)",
+        html: "<section class='panel stack'>...</section>",
+        notes: "Chat, plan, interaction, and action history.",
+      },
+      {
+        id: "workbench",
+        label: "Workbench Surface",
+        selector: "section.layout > section:nth-of-type(2)",
+        html: "<section class='panel stack'>...</section>",
+        notes: "Files, editor, preview, terminal, and diff.",
+      },
+    ];
+  const selectedBlockId = overrides.selectedBlockId ?? blocks[0]?.id;
+  const selectedBlock = blocks.find((block) => block.id === selectedBlockId) ?? blocks[0];
+
+  return {
+    selectedBlockId,
+    blocks,
+    properties:
+      overrides.properties ??
+      [
+        {
+          key: "headline",
+          label: "Headline",
+          value: selectedBlock?.label ?? "Hero Banner",
+        },
+        {
+          key: "tone",
+          label: "Tone",
+          value: "Operational",
+        },
+        {
+          key: "visual_focus",
+          label: "Visual Focus",
+          value: "Execution visibility",
+        },
+      ],
+    ...(overrides.lastIntent ? { lastIntent: overrides.lastIntent } : {}),
+  };
+}
+
+export function createInteractiveWebEditResponse(
+  request: InteractiveWebEditRequest,
+  state: InteractiveWebEditorState = createInteractiveWebEditorState(),
+): InteractiveWebEditResponse {
+  const selectedBlock =
+    state.blocks.find((block) => block.id === request.selection.blockId) ?? state.blocks[0];
+  const nextState = createInteractiveWebEditorState({
+    ...state,
+    selectedBlockId: request.selection.blockId,
+    properties: request.properties ?? state.properties,
+    lastIntent: request.intent,
+  });
+  const propertySummary = (request.properties ?? [])
+    .map((property) => `${property.label}: ${property.value}`)
+    .join(", ");
+
+  return {
+    nextState,
+    suggestedPrompt: [
+      `Update page block ${request.selection.blockId} at ${request.selection.path}.`,
+      `Strategy: ${request.patchStrategy}.`,
+      `Intent: ${request.intent}.`,
+      selectedBlock ? `Selector: ${selectedBlock.selector}.` : "",
+      propertySummary ? `Properties: ${propertySummary}.` : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
   };
 }
 
@@ -126,6 +254,55 @@ function renderPendingInteraction(interaction: PendingInteraction | undefined): 
       <p class="eyebrow">Input Required</p>
       <h3>${escapeHtml(interaction.label)}</h3>
       <p>${escapeHtml(interaction.placeholder ?? "No placeholder provided")}</p>
+    </section>
+  `;
+}
+
+function renderWebEditor(state: InteractiveWebEditorState): string {
+  const selectedBlock =
+    state.blocks.find((block) => block.id === state.selectedBlockId) ?? state.blocks[0];
+
+  return `
+    <section class="card accent-card">
+      <p class="eyebrow">Interactive Web Editor</p>
+      <h3>${escapeHtml(selectedBlock?.label ?? "No block selected")}</h3>
+      <p>${escapeHtml(selectedBlock?.notes ?? "Select a page block and refine it with intent plus structured properties.")}</p>
+      <div class="subgrid">
+        <div class="card">
+          <p class="eyebrow">Blocks</p>
+          <ul class="message-list">
+            ${state.blocks
+              .map(
+                (block) => `
+                  <li class="${block.id === state.selectedBlockId ? "selected-item" : ""}">
+                    <strong>${escapeHtml(block.label)}</strong>
+                    <p>${escapeHtml(block.selector)}</p>
+                  </li>
+                `,
+              )
+              .join("")}
+          </ul>
+        </div>
+        <div class="card">
+          <p class="eyebrow">Properties</p>
+          <ul class="message-list">
+            ${state.properties
+              .map(
+                (property) => `
+                  <li>
+                    <strong>${escapeHtml(property.label)}</strong>
+                    <p>${escapeHtml(property.value)}</p>
+                  </li>
+                `,
+              )
+              .join("")}
+          </ul>
+        </div>
+      </div>
+      <div class="card">
+        <p class="eyebrow">Intent</p>
+        <p>${escapeHtml(state.lastIntent ?? "No edit request captured yet.")}</p>
+      </div>
     </section>
   `;
 }
@@ -286,6 +463,13 @@ export function renderWebAppDocument(input: WebAppBootstrap): string {
         background: rgba(255, 250, 240, 0.65);
       }
 
+      .selected-item {
+        padding: 10px;
+        border-radius: 12px;
+        background: rgba(179, 84, 30, 0.08);
+        border: 1px solid rgba(179, 84, 30, 0.18);
+      }
+
       .subgrid {
         display: grid;
         gap: 14px;
@@ -388,6 +572,10 @@ export function renderWebAppDocument(input: WebAppBootstrap): string {
             <div>
               <p class="eyebrow">InteractionPanel</p>
               ${renderPendingInteraction(workbench.pendingInteraction)}
+            </div>
+
+            <div>
+              ${renderWebEditor(workbench.webEditor)}
             </div>
 
             <div class="card">

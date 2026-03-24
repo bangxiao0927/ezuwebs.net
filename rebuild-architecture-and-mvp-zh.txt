@@ -18,7 +18,7 @@
 
 /apps
   /web
-    前端应用。负责聊天、计划面板、diff 面板、编辑器、预览、终端、用户确认交互。
+    前端应用。负责聊天、计划面板、diff 面板、编辑器、预览、终端、用户确认交互，以及交互式网页块编辑入口。
 
   /agent
     Agent 编排服务。负责会话状态、模型路由、工具调用、事件流输出、权限控制。
@@ -60,6 +60,7 @@
 - 展示计划和执行状态
 - 展示文件树、编辑器、终端、预览
 - 收集用户确认、用户选择、用户补充输入
+- 提供面向页面 block 的轻量编辑接口，方便后续细化网页结构和内容
 - 消费后端事件流
 
 这一层不直接依赖某个模型，只依赖统一事件协议。
@@ -178,6 +179,13 @@
 - file.conflict.requested
 
 这是做“交互式设计”最关键的层。
+
+8. page-editor
+
+负责：
+- 接收页面 block 级别的编辑请求
+- 把 `selection + intent + properties` 转成更精确的 patch 任务
+- 让“网页微调”不必每次都退回整文件重写
 
 ====================
 四、推荐核心类型定义
@@ -349,6 +357,39 @@ export interface RuntimeProcess {
   onExit(cb: (code: number) => void): void;
 }
 ```
+
+10. 交互式网页编辑接口
+
+建议单独定义一个轻量接口，先服务 MVP，后续可扩展到可视化编辑。
+
+```ts
+export interface InteractiveWebEditRequest {
+  selection: {
+    blockId: string;
+    path: string;
+  };
+  intent: string;
+  patchStrategy: 'replace' | 'append' | 'refine';
+  properties?: Array<{
+    key: string;
+    label: string;
+    value: string;
+  }>;
+}
+
+export interface InteractiveWebEditResponse {
+  suggestedPrompt: string;
+  nextState: {
+    selectedBlockId?: string;
+    lastIntent?: string;
+  };
+}
+```
+
+这个接口的意义不是代替代码编辑器，而是补一个“网页块级别”的中间层：
+- 上层用户交互比直接改文件更友好
+- 下层 coder 仍然可以继续产出 patch
+- 后续如果接设计稿对齐、组件属性面板、局部预览，这个接口可以直接扩展
 
 9. 模型网关接口
 

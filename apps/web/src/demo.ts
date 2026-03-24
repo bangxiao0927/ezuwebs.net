@@ -1,6 +1,12 @@
 import { type AgentEvent } from "@ezu/protocol";
 
-import { createWebAppShell, renderWebAppDocument, type WebAppBootstrap } from "./index";
+import {
+  createInteractiveWebEditResponse,
+  createWebAppShell,
+  renderWebAppDocument,
+  type InteractiveWebEditRequest,
+  type WebAppBootstrap,
+} from "./index";
 
 export function createDemoBootstrap(): WebAppBootstrap {
   const events: AgentEvent[] = [
@@ -65,6 +71,28 @@ export function createDemoBootstrap(): WebAppBootstrap {
     },
   ];
 
+  const editRequest: InteractiveWebEditRequest = {
+    selection: {
+      blockId: "hero",
+      path: "main > header.topbar",
+    },
+    intent: "Make the workspace title and runtime status read more clearly at a glance.",
+    patchStrategy: "refine",
+    properties: [
+      {
+        key: "headline",
+        label: "Headline",
+        value: "AI IDE Workbench",
+      },
+      {
+        key: "status_focus",
+        label: "Status Focus",
+        value: "Runtime and active session",
+      },
+    ],
+  };
+  const webEditor = createInteractiveWebEditResponse(editRequest).nextState;
+
   return {
     config: {
       projectName: "ezuwebs.net",
@@ -73,6 +101,7 @@ export function createDemoBootstrap(): WebAppBootstrap {
     initialEvents: events,
     sessionId: "demo-session",
     projectId: "demo-project",
+    webEditor,
   };
 }
 
