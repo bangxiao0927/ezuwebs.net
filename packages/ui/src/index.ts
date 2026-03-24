@@ -23,3 +23,15 @@ export const rightWorkbenchPanels: WorkspacePanel[] = [
   "PreviewPanel",
   "DiffPanel",
 ];
+
+export const workspacePanelLabels: Record<WorkspacePanel, string> = {
+  ChatPanel: "Chat",
+  PlanPanel: "Plan",
+  InteractionPanel: "Interaction",
+  ActionTimeline: "Timeline",
+  FileTree: "Files",
+  EditorPanel: "Editor",
+  TerminalPanel: "Terminal",
+  PreviewPanel: "Preview",
+  DiffPanel: "Diff",
+};
