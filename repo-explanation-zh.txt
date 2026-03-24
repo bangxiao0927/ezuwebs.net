@@ -1,0 +1,684 @@
+这个 repo 本质上是一个跑在 Cloudflare Pages + Remix + React 上的前端应用，但它的核心能力不只是聊天 UI，而是把大模型输出转成结构化“动作”，再在浏览器里的 WebContainer 中执行这些动作，最终让用户直接在页面里看到代码、终端和预览。
+
+整体架构
+
+这个仓库不是 monorepo，而是单应用。构建和开发入口在 /Users/bangxiao/Documents/bolt.new/package.json 和 /Users/bangxiao/Documents/bolt.new/vite.config.ts。前端框架是 Remix，SSR 入口是 /Users/bangxiao/Documents/bolt.new/app/entry.server.tsx，客户端 hydration 入口是 /Users/bangxiao/Documents/bolt.new/app/entry.client.tsx，全局壳子在 /Users/bangxiao/Documents/bolt.new/app/root.tsx。部署时通过 Cloudflare Pages Function 的兜底处理器 /Users/bangxiao/Documents/bolt.new/functions/[[path]].ts 把所有请求交给 Remix server build。
+
+页面主路由很简单：首页 /Users/bangxiao/Documents/bolt.new/app/routes/_index.tsx 渲染 Header + Chat，聊天历史页 /Users/bangxiao/Documents/bolt.new/app/routes/chat.$id.tsx 其实复用了首页组件，只是 loader 会把 id 带下来，用来恢复历史会话。
+
+它怎么“运作”
+
+这套产品的主链路是：
+
+1. 用户在聊天框输入需求。
+2. 前端用 useChat 调 /api/chat。
+3. 服务端把消息发给 Anthropic 模型，并强制模型遵守自定义协议输出。
+4. 前端一边流式显示文本，一边解析模型回复里的 <boltArtifact> / <boltAction>。
+5. 解析到的 file 动作会写入 WebContainer 文件系统，shell 动作会在浏览器内 shell 里执行。
+6. 文件树、编辑器、终端、预览面板都订阅同一个工作台状态，所以会实时更新。
+
+这条链路的前端入口在 /Users/bangxiao/Documents/bolt.new/app/components/chat/Chat.client.tsx。它做了几件关键事：
+- 用 useChat({ api: '/api/chat' }) 发起流式对话。
+- 在发送消息前调用 workbenchStore.saveAllFiles()，确保用户在编辑器里未保存的修改先落盘。
+- 如果用户改过文件，会把 diff 包进用户消息里一起发给模型，让模型知道当前项目状态。
+- 收到模型流式输出后，交给 useMessageParser() 解析成可执行动作。
+
+服务端 API 在 /Users/bangxiao/Documents/bolt.new/app/routes/api.chat.ts。它不直接写业务逻辑，而是调用 /Users/bangxiao/Documents/bolt.new/app/lib/.server/llm/stream-text.ts。这里会：
+- 读取 API Key: /Users/bangxiao/Documents/bolt.new/app/lib/.server/llm/api-key.ts
+- 固定使用 Anthropic 模型: /Users/bangxiao/Documents/bolt.new/app/lib/.server/llm/model.ts
+- 注入非常长的 system prompt: /Users/bangxiao/Documents/bolt.new/app/lib/.server/llm/prompts.ts
+
+这个 system prompt 是整个 repo 的灵魂。它告诉模型：
+- 运行环境是 WebContainer，不是完整 Linux。
+- 不能跑原生二进制，不能用 pip，不能用 git。
+- 必须把回复包装成 <boltArtifact> 和 <boltAction>。
+- boltAction 只有两类：file 和 shell。
+- 必须输出完整文件内容，且动作顺序要正确。
+
+也就是说，这个系统不是“自由聊天”，而是“让模型按 DSL 协议生成可执行计划”。
+
+前端如何把模型回复变成代码和命令
+
+解析器在 /Users/bangxiao/Documents/bolt.new/app/lib/runtime/message-parser.ts。它是一个流式 parser，会逐字符扫描 assistant 输出：
+- 遇到 <boltArtifact ...> 就创建一个工作单元。
+- 遇到 <boltAction type="file" filePath="..."> 就收集文件内容。
+- 遇到 <boltAction type="shell"> 就收集命令内容。
+- 遇到关闭标签时，触发回调。
+
+这些回调在 /Users/bangxiao/Documents/bolt.new/app/lib/hooks/useMessageParser.ts 里接到 workbenchStore：
+- onArtifactOpen：打开 workbench，登记一次任务。
+- onActionOpen/onActionClose：把动作加入当前任务。
+- onActionClose：真正执行动作。
+
+真正执行动作的是 /Users/bangxiao/Documents/bolt.new/app/lib/runtime/action-runner.ts。这里做了两件事：
+- file 动作：在 WebContainer 里 mkdir + writeFile
+- shell 动作：在 WebContainer 里 spawn('jsh', ['-c', command])
+
+而且它用 #currentExecutionPromise 串行化执行，保证动作按模型给出的顺序跑，不会乱序。
+
+为什么能在浏览器里看到文件、终端、预览
+
+因为 repo 用了 WebContainer。初始化在 /Users/bangxiao/Documents/bolt.new/app/lib/webcontainer/index.ts，客户端启动时 WebContainer.boot({ workdirName: 'project' })，工作目录常量在 /Users/bangxiao/Documents/bolt.new/app/utils/constants.ts。
+
+围绕 WebContainer 有 3 个核心 store：
+
+- /Users/bangxiao/Documents/bolt.new/app/lib/stores/files.ts
+负责监听 WebContainer 文件变化，把 /home/project 下的目录树同步成前端可渲染的 files map。它也会记录“自上次发消息以来用户改了哪些文件”，用于生成 diff 回传给模型。
+
+- /Users/bangxiao/Documents/bolt.new/app/lib/stores/terminal.ts
+负责给 xterm 挂接 shell。真正创建交互 shell 的代码在 /Users/bangxiao/Documents/bolt.new/app/utils/shell.ts。
+
+- /Users/bangxiao/Documents/bolt.new/app/lib/stores/previews.ts
+监听 WebContainer 的 port 事件。只要项目里启动了 dev server，比如 Vite，它就会收到端口和 URL，然后让预览面板显示 iframe。
+
+这些 store 被总控 /Users/bangxiao/Documents/bolt.new/app/lib/stores/workbench.ts 组合起来。WorkbenchStore 基本就是整个 IDE 面板的状态中心，统一管理：
+- 当前任务
+- 文件列表
+- 当前选中文件
+- 未保存文件
+- 终端显隐
+- 预览列表
+- 动作执行
+
+UI 是怎么拼出来的
+
+聊天区基础布局在 /Users/bangxiao/Documents/bolt.new/app/components/chat/BaseChat.tsx，它左侧挂侧边栏，右侧在聊天开始后挂上 Workbench。
+
+工作台面板在 /Users/bangxiao/Documents/bolt.new/app/components/workbench/Workbench.client.tsx，可以在 Code / Preview 两个视图间切换：
+- Code 视图的主体是 /Users/bangxiao/Documents/bolt.new/app/components/workbench/EditorPanel.tsx，里面是文件树、CodeMirror 编辑器、xterm 终端。
+- Preview 视图是 /Users/bangxiao/Documents/bolt.new/app/components/workbench/Preview.tsx，本质上就是一个指向 WebContainer 暴露 URL 的 iframe。
+
+聊天消息渲染时，assistant 文本先走 /Users/bangxiao/Documents/bolt.new/app/components/chat/Markdown.tsx。这里有个关键点：parser 会把 <boltArtifact> 替换成一个占位 div.__boltArtifact__，然后 Markdown 组件把这个 div 渲染成真正的 /Users/bangxiao/Documents/bolt.new/app/components/chat/Artifact.tsx。所以用户在聊天区里看到的不是原始 XML 标签，而是一个“可展开的任务卡片”，里面能显示：
+- 创建了哪些文件
+- 跑了哪些命令
+- 当前动作状态
+
+聊天历史怎么保存
+
+历史持久化是纯前端做的，用 IndexedDB：
+- DB 打开与读写在 /Users/bangxiao/Documents/bolt.new/app/lib/persistence/db.ts
+- 逻辑入口在 /Users/bangxiao/Documents/bolt.new/app/lib/persistence/useChatHistory.ts
+
+它会在消息变化时把整段 messages 存进 boltHistory 数据库。等模型第一次产出 artifact 标题后，会把标题当作会话描述，并把 URL 改成 /chat/:id。侧边栏 /Users/bangxiao/Documents/bolt.new/app/components/sidebar/Menu.client.tsx 再把这些历史记录按日期分组展示。
+
+补两点实现上的关键理解
+
+第一，这个项目的“智能”主要不在 React 组件，而在那份 system prompt 和前端 parser 协议。模型只要守协议，前端就能把回复自动执行成项目文件和命令。
+
+第二，它不是传统 SaaS 代码生成器那种“服务端跑容器”，而是把执行环境放进浏览器。也就是：
+- 服务端只负责“调用模型并流式转发”
+- 真正的文件系统、终端、预览、运行命令都在用户浏览器里的 WebContainer 中完成
+
+所以它的核心价值可以概括成一句话：
+
+这个 repo 是一个“基于协议驱动的浏览器内 AI 编程 IDE”。
+Remix 负责页面和 API，Anthropic 负责生成结构化动作，Message Parser 负责把回复转成事件，WorkbenchStore 负责统一状态，WebContainer 负责真正执行项目并产出预览。
+
+从一次用户发消息开始的完整调用链
+
+1. 页面先启动
+
+用户打开首页后，请求先到 Cloudflare Pages 的 /Users/bangxiao/Documents/bolt.new/functions/[[path]].ts，它把请求交给 Remix。
+Remix SSR 入口是 /Users/bangxiao/Documents/bolt.new/app/entry.server.tsx，客户端接管在 /Users/bangxiao/Documents/bolt.new/app/entry.client.tsx。
+真正首页组件是 /Users/bangxiao/Documents/bolt.new/app/routes/_index.tsx，里面渲染 Header 和 Chat。
+
+2. Chat 组件初始化
+
+/Users/bangxiao/Documents/bolt.new/app/components/chat/Chat.client.tsx 是主入口。它做三件事：
+- 用 useChatHistory() 恢复 IndexedDB 里的历史消息
+- 用 useChat({ api: '/api/chat' }) 建立和后端聊天 API 的流式连接
+- 用 useMessageParser() 准备解析 assistant 的结构化输出
+
+如果当前 URL 是 /chat/:id，那 /Users/bangxiao/Documents/bolt.new/app/lib/persistence/useChatHistory.ts 会先从 IndexedDB 取出历史 messages，作为 useChat 的 initialMessages。
+
+3. 用户点击发送
+
+用户在输入框里按回车，最终会调用 sendMessage()，位置还是 /Users/bangxiao/Documents/bolt.new/app/components/chat/Chat.client.tsx。
+
+这里的顺序很关键：
+
+先 await workbenchStore.saveAllFiles()
+意思是：如果用户刚在右侧编辑器里改了文件但还没保存，先全部写回 WebContainer 文件系统。
+
+然后取 workbenchStore.getFileModifcations()
+这一步会从 /Users/bangxiao/Documents/bolt.new/app/lib/stores/files.ts 里拿到“自上次发消息以来，哪些文件被用户改了”。
+
+如果有改动，就把 diff 包成一段特殊文本插到用户消息前面，再 append({ role: 'user', content: ... })。
+这样模型拿到的不是纯自然语言，而是：
+- 用户这次的新需求
+- 当前工程里用户已经改过的文件差异
+
+这就是它能“持续接着改项目”的关键。
+
+4. 请求进入 /api/chat
+
+前端 useChat 会调用 /Users/bangxiao/Documents/bolt.new/app/routes/api.chat.ts。
+
+这里会：
+- 读取请求体里的 messages
+- 创建 SwitchableStream
+- 调用 /Users/bangxiao/Documents/bolt.new/app/lib/.server/llm/stream-text.ts
+
+stream-text.ts 会把这些消息发给 Anthropic，并自动附带 system prompt，system prompt 在 /Users/bangxiao/Documents/bolt.new/app/lib/.server/llm/prompts.ts。
+
+这份 prompt 强制模型按下面格式输出：
+
+<boltArtifact id="..." title="...">
+  <boltAction type="file" filePath="...">...</boltAction>
+  <boltAction type="shell">...</boltAction>
+</boltArtifact>
+
+也就是说，后端并不理解“如何改代码”，它只负责把上下文喂给模型，并把模型输出流式返回。
+
+5. assistant 输出开始流回来
+
+前端 useChat 一边收到 token，一边把 assistant 消息更新到 messages 里。
+接着 Chat.client.tsx 里的 useEffect 会触发：
+- parseMessages(messages, isLoading)
+- storeMessageHistory(messages)
+
+前者做“执行”，后者做“持久化”。
+
+6. 流式解析 assistant 回复
+
+parseMessages() 来自 /Users/bangxiao/Documents/bolt.new/app/lib/hooks/useMessageParser.ts，底层是 /Users/bangxiao/Documents/bolt.new/app/lib/runtime/message-parser.ts。
+
+这个 parser 是增量式的。assistant 回复哪怕只回来一半，它也会从上次解析到的位置继续扫。
+
+它会识别四个关键事件：
+- onArtifactOpen
+- onArtifactClose
+- onActionOpen
+- onActionClose
+
+例如：
+- 读到 <boltArtifact ...> 时，触发 onArtifactOpen
+- 读到 <boltAction type="file"...> 时，开始收集文件内容
+- 读到 </boltAction> 时，说明这个动作完整了，触发 onActionClose
+
+7. 解析事件进入 Workbench
+
+这些回调都接到 /Users/bangxiao/Documents/bolt.new/app/lib/stores/workbench.ts。
+
+具体是：
+- onArtifactOpen -> workbenchStore.addArtifact(...)
+- onActionOpen / onActionClose -> workbenchStore.addAction(...)
+- onActionClose -> workbenchStore.runAction(...)
+
+这里有个重要设计：
+每个 assistant 消息会对应一个 ActionRunner，定义在 /Users/bangxiao/Documents/bolt.new/app/lib/runtime/action-runner.ts。
+
+ActionRunner 会把动作排队串行执行，避免同时写文件、同时跑命令导致状态混乱。
+
+8. 真正执行 file / shell
+
+ActionRunner 分两种：
+
+file 动作：
+- 确保目录存在
+- 调 webcontainer.fs.writeFile(...)
+
+shell 动作：
+- 调 webcontainer.spawn('jsh', ['-c', command])
+- 把输出流接到控制台
+
+也就是说，模型给出的命令和文件，不是在服务器上执行，而是在浏览器里的 WebContainer 执行。
+
+WebContainer 初始化在 /Users/bangxiao/Documents/bolt.new/app/lib/webcontainer/index.ts，工作目录是 /home/project，定义在 /Users/bangxiao/Documents/bolt.new/app/utils/constants.ts。
+
+9. 执行结果如何反映到 UI
+
+这里是整个 repo 最漂亮的一段闭环。
+
+文件变化：
+/Users/bangxiao/Documents/bolt.new/app/lib/stores/files.ts 会监听 WebContainer 文件系统事件。
+一旦模型写了新文件或改了旧文件，files store 立刻更新。
+
+于是：
+- 文件树刷新
+- 编辑器内容刷新
+- 未保存状态刷新
+
+终端输出：
+/Users/bangxiao/Documents/bolt.new/app/lib/stores/terminal.ts 管理 xterm 终端实例。
+如果用户打开终端面板，会通过 /Users/bangxiao/Documents/bolt.new/app/utils/shell.ts 在 WebContainer 中创建交互 shell。
+
+预览刷新：
+/Users/bangxiao/Documents/bolt.new/app/lib/stores/previews.ts 监听 WebContainer 的端口事件。
+如果 shell 动作跑了 npm run dev 之类命令，Vite server 启动后会暴露一个 URL，preview store 收到后，右侧 /Users/bangxiao/Documents/bolt.new/app/components/workbench/Preview.tsx 就把这个 URL 塞进 iframe。
+
+所以用户看到的是：AI 一边说，一边写文件，一边跑命令，一边右侧项目长出来。
+
+10. 聊天区里的“任务卡片”怎么来的
+
+assistant 文本不是直接原样渲染。
+/Users/bangxiao/Documents/bolt.new/app/components/chat/Markdown.tsx 会把 parser 注入的 __boltArtifact__ 占位节点替换成 /Users/bangxiao/Documents/bolt.new/app/components/chat/Artifact.tsx。
+
+这个组件会读取当前 artifact 对应的 actions 和状态，展示：
+- 创建了哪些文件
+- 执行了哪些命令
+- 每一步现在是 pending/running/complete/failed
+
+所以聊天区本质上不只是文本区，而是一个“执行计划可视化面板”。
+
+11. 消息如何保存成历史会话
+
+每次消息变化时，storeMessageHistory(messages) 会执行，定义在 /Users/bangxiao/Documents/bolt.new/app/lib/persistence/useChatHistory.ts。
+
+它会把完整消息数组写到 IndexedDB，底层实现见 /Users/bangxiao/Documents/bolt.new/app/lib/persistence/db.ts。
+
+当模型第一次产出 artifact title/id 后：
+- title 会作为会话描述
+- id 会用于生成 /chat/:id
+- 侧边栏 /Users/bangxiao/Documents/bolt.new/app/components/sidebar/Menu.client.tsx 就能显示这条历史记录
+
+一句话总结这条调用链
+
+一次用户发消息的完整链路就是：
+
+用户输入
+-> Chat.client.tsx 收集输入和本地文件 diff
+-> /api/chat 调模型
+-> 模型按 <boltArtifact>/<boltAction> 协议流式输出
+-> message-parser 增量解析
+-> workbenchStore 建立任务并调 ActionRunner
+-> ActionRunner 在 WebContainer 写文件 / 跑命令
+-> files/terminal/previews store 响应更新
+-> 聊天区、编辑器、终端、预览同步刷新
+-> IndexedDB 保存会话历史
+
+Store 和状态协作
+
+总控：workbenchStore
+
+核心是 /Users/bangxiao/Documents/bolt.new/app/lib/stores/workbench.ts。
+它不是单纯存一个对象，而是把几个子系统组合起来：
+
+- PreviewsStore：管理预览地址
+- FilesStore：管理文件树和文件内容
+- EditorStore：管理当前编辑中的文档
+- TerminalStore：管理终端实例和显隐
+- ActionRunner：按顺序执行 AI 生成的动作
+
+workbenchStore 对外暴露的是整个右侧 IDE 面板需要的统一接口，比如：
+- 当前选中文件
+- 当前编辑文档
+- 文件列表
+- 未保存文件
+- 当前视图是 code 还是 preview
+- 是否显示 terminal
+- 执行 AI action
+- 保存文件 / 保存全部文件
+
+所以组件基本不直接碰 WebContainer，而是通过 workbenchStore 间接操作。
+
+1. FilesStore：文件系统真相源
+
+/Users/bangxiao/Documents/bolt.new/app/lib/stores/files.ts 是“项目文件状态”的真相源。
+
+它的职责：
+- 监听 WebContainer 文件系统变化
+- 维护 files: MapStore<FileMap>
+- 区分文件和文件夹
+- 判断二进制文件，避免编辑器误显示
+- 保存用户修改
+- 记录“自上次发消息以来哪些文件被用户改过”
+
+这里最关键的是两个状态：
+- files
+- #modifiedFiles
+
+files 表示当前 WebContainer 里真实存在的项目文件。
+#modifiedFiles 表示用户改过哪些文件，以及原始内容是什么。这个状态专门给下一次发消息时生成 diff 用。
+
+所以 FilesStore 既服务 UI，也服务 prompt 上下文。
+
+2. EditorStore：编辑器当前打开了什么
+
+EditorStore 的代码没单独展开，但从 /Users/bangxiao/Documents/bolt.new/app/lib/stores/workbench.ts 和 /Users/bangxiao/Documents/bolt.new/app/components/workbench/EditorPanel.tsx 的调用关系能看出来，它负责：
+
+- 当前选中的文件路径
+- 当前文档内容
+- 滚动位置
+- 文档和文件系统内容之间的映射
+
+它和 FilesStore 的关系是：
+- FilesStore 管“磁盘”
+- EditorStore 管“编辑会话中的文档状态”
+
+所以用户在编辑器里敲字时，并不是每个字符都直接写回 WebContainer；而是先更新 EditorStore，点击保存或发送消息前，再由 workbenchStore.saveFile/saveAllFiles() 写回 FilesStore/WebContainer。
+
+3. TerminalStore：终端连接层
+
+/Users/bangxiao/Documents/bolt.new/app/lib/stores/terminal.ts 很纯粹，它不负责 shell 逻辑本身，只负责：
+
+- showTerminal 显隐状态
+- 维护已挂接的 terminal 实例
+- 在 WebContainer 里创建 shell 进程
+- 终端 resize 时同步给进程
+
+真正创建 shell 的细节在 /Users/bangxiao/Documents/bolt.new/app/utils/shell.ts。
+这里会 spawn('/bin/jsh', ['--osc'])，等 shell 进入 interactive 模式后，把用户输入和终端输出对接起来。
+
+所以 TerminalStore 本质上是：
+xterm UI 和 WebContainer shell 之间的桥。
+
+4. PreviewsStore：预览端口目录
+
+/Users/bangxiao/Documents/bolt.new/app/lib/stores/previews.ts 专门监听 WebContainer 的 port 事件。
+
+职责只有三个：
+- 记录当前有哪些可访问端口
+- 记录每个端口是否 ready
+- 给出对应 baseUrl
+
+这意味着它根本不关心项目是 React、Vite、Next 还是别的。
+只要容器里某个服务启动并暴露端口，它就记下来。
+
+/Users/bangxiao/Documents/bolt.new/app/components/workbench/Preview.tsx 再从这个 store 里拿 URL，塞进 iframe。
+
+所以预览系统的设计很干净：
+- 后端不参与
+- 模型也不直接控制 iframe
+- 纯靠 WebContainer 的端口事件驱动
+
+5. chatStore：聊天 UI 的轻量状态
+
+/Users/bangxiao/Documents/bolt.new/app/lib/stores/chat.ts 很简单，只有：
+
+- started
+- aborted
+- showChat
+
+它主要服务聊天区 UI，比如：
+- 是否已经开始对话
+- 停止生成后 UI 应该显示什么
+- 某些动画/布局切换
+
+也就是说，chatStore 不是业务核心，只是聊天面板的局部 UI 状态。
+
+6. themeStore：主题状态
+
+/Users/bangxiao/Documents/bolt.new/app/root.tsx 和编辑器、终端都会订阅主题状态。
+它主要影响：
+- HTML data-theme
+- CodeMirror 主题
+- Terminal 样式
+- 全局 CSS 变量
+
+这是典型的全局展示状态，不参与业务链路。
+
+7. ActionRunner：不是 store，但它像状态机
+
+/Users/bangxiao/Documents/bolt.new/app/lib/runtime/action-runner.ts 严格说不是 UI store，但它维护了一份 actions: MapStore<Record<string, ActionState>>，所以在系统里扮演了“执行态 store”的角色。
+
+每个 action 有：
+- pending
+- running
+- complete
+- aborted
+- failed
+
+聊天区里的 /Users/bangxiao/Documents/bolt.new/app/components/chat/Artifact.tsx 就是订阅这个状态来显示每一步执行进度。
+
+所以如果说 FilesStore 保存的是“项目状态”，那 ActionRunner.actions 保存的就是“执行状态”。
+
+这些 store 怎么协作
+
+一次典型协作链路是这样的：
+
+1. 用户在编辑器改文件
+EditorStore 更新当前文档内容
+workbenchStore 根据原始文件内容，更新 unsavedFiles
+
+2. 用户点击发送
+workbenchStore.saveAllFiles()
+把 EditorStore 内容写回 FilesStore/WebContainer
+
+3. 前端发消息前
+FilesStore.getFileModifications() 生成 diff
+把 diff 注入 prompt 发给模型
+
+4. 模型流式回复
+useMessageParser() 解析出 action
+workbenchStore.addAction/runAction()
+
+5. ActionRunner 执行
+如果是 file，写 WebContainer 文件系统
+如果是 shell，在 WebContainer 里跑命令
+
+6. WebContainer 有变化
+FilesStore 监听到文件变动
+PreviewsStore 监听到端口变动
+TerminalStore 把 shell 输出写进终端
+
+7. UI 自动刷新
+文件树、编辑器、执行卡片、预览 iframe 全都因为订阅 store 而更新
+
+最值得注意的设计点
+
+这个 repo 的状态设计有一个很明确的分层：
+
+- WebContainer 是运行时真相
+- FilesStore / PreviewsStore / TerminalStore 是运行时同步层
+- WorkbenchStore 是编排层
+- React 组件只是订阅和触发操作
+
+这意味着它不是“组件里塞一堆状态”的写法，而是比较典型的：
+运行环境驱动状态，状态驱动 UI。
+
+一句话记忆
+
+如果你只记一件事，可以记这个：
+
+- FilesStore 管项目文件
+- EditorStore 管当前编辑态
+- TerminalStore 管 shell
+- PreviewsStore 管端口预览
+- ActionRunner 管 AI 动作执行状态
+- WorkbenchStore 把上面这些全部串起来
+
+组件之间怎么连接这些 store
+
+可以把页面拆成 4 块：聊天区、任务卡片、工作台、侧边栏。
+
+1. 最外层页面怎么组装
+
+首页 /Users/bangxiao/Documents/bolt.new/app/routes/_index.tsx 很薄，只负责渲染：
+- Header
+- Chat
+
+真正的页面骨架在 /Users/bangxiao/Documents/bolt.new/app/components/chat/BaseChat.tsx。它把界面分成两部分：
+- 左中区域：聊天消息和输入框
+- 右侧区域：Workbench
+
+也就是说，从组件结构上看，这个产品其实是“聊天面板 + IDE 面板”的双栏布局，只是 Workbench 初始隐藏。
+
+2. 聊天区依赖哪些状态
+
+核心组件是 /Users/bangxiao/Documents/bolt.new/app/components/chat/Chat.client.tsx。
+
+它自己持有或接入的状态包括：
+- useChat() 返回的 messages / isLoading / input
+- useChatHistory() 返回的历史消息
+- useMessageParser() 生成的 parsedMessages
+- chatStore 里的 showChat
+- workbenchStore 的文件保存、diff、动作中止能力
+
+然后它把这些状态全部传给 /Users/bangxiao/Documents/bolt.new/app/components/chat/BaseChat.tsx。
+
+BaseChat 只做展示和交互分发：
+- 输入框内容
+- 是否正在流式输出
+- 点击发送 / 停止
+- 消息列表
+- prompt enhancer 按钮
+- 首屏示例 prompt
+
+所以职责分层是：
+- Chat.client.tsx 管数据和行为
+- BaseChat.tsx 管布局和交互壳子
+
+3. 消息列表怎么渲染
+
+消息列表在 /Users/bangxiao/Documents/bolt.new/app/components/chat/Messages.client.tsx。
+
+它只做一件事：按 role 分发组件：
+- 用户消息 -> /Users/bangxiao/Documents/bolt.new/app/components/chat/UserMessage.tsx
+- 助手消息 -> /Users/bangxiao/Documents/bolt.new/app/components/chat/AssistantMessage.tsx
+
+助手消息内部会走 /Users/bangxiao/Documents/bolt.new/app/components/chat/Markdown.tsx。
+
+这里是组件树里最关键的一跳，因为 assistant 返回的不是普通 Markdown，而是：
+- 普通解释文字
+- 代码块
+- parser 插入的 __boltArtifact__ 占位节点
+
+Markdown.tsx 会把这些内容分发成：
+- 普通 markdown/html
+- 代码块 -> /Users/bangxiao/Documents/bolt.new/app/components/chat/CodeBlock.tsx
+- __boltArtifact__ -> /Users/bangxiao/Documents/bolt.new/app/components/chat/Artifact.tsx
+
+所以聊天区其实是“富文本 + 执行状态卡片”的混合视图。
+
+4. 任务卡片怎么连到执行状态
+
+/Users/bangxiao/Documents/bolt.new/app/components/chat/Artifact.tsx 会根据 messageId 去订阅 workbenchStore.artifacts，再拿到对应 artifact.runner.actions。
+
+这意味着任务卡片不是静态文本，而是直接绑定执行状态：
+- action 刚出现时显示 pending
+- 开始执行时显示 running
+- 成功后显示 complete
+- 失败后显示 failed
+
+同时它还能点一下打开/关闭右侧 workbench，因为它直接读写了 workbenchStore.showWorkbench。
+
+所以聊天区里的这张卡片，本质上是工作台执行过程在聊天区域的镜像 UI。
+
+5. Workbench 是怎么接 store 的
+
+右侧工作台入口在 /Users/bangxiao/Documents/bolt.new/app/components/workbench/Workbench.client.tsx。
+
+它订阅的全是 workbenchStore 暴露出来的聚合状态：
+- previews
+- showWorkbench
+- selectedFile
+- currentDocument
+- unsavedFiles
+- files
+- currentView
+
+它自己并不关心 WebContainer 或 parser，只管：
+- 面板开关
+- Code / Preview 切换
+- 把对应数据传给 EditorPanel 或 Preview
+
+所以 Workbench 是一个“路由器式组件”，负责把总状态分发给两个大子面板。
+
+6. 编辑器面板怎么接状态
+
+/Users/bangxiao/Documents/bolt.new/app/components/workbench/EditorPanel.tsx 是右侧 code 视图的核心。
+
+它接收：
+- files
+- unsavedFiles
+- editorDocument
+- selectedFile
+- isStreaming
+
+然后把这些再分给几个更小组件：
+- 文件树 -> /Users/bangxiao/Documents/bolt.new/app/components/workbench/FileTree.tsx
+- 面包屑 -> /Users/bangxiao/Documents/bolt.new/app/components/workbench/FileBreadcrumb.tsx
+- 代码编辑器 -> CodeMirrorEditor
+- 终端 -> Terminal
+
+这里的交互方向是双向的：
+
+从 store 到 UI：
+- 当前文件内容显示到编辑器
+- 未保存状态显示 Save/Reset 按钮
+- 文件树高亮当前文件
+
+从 UI 到 store：
+- 用户选文件 -> onFileSelect -> workbenchStore.setSelectedFile()
+- 用户敲字 -> onEditorChange -> workbenchStore.setCurrentDocumentContent()
+- 用户保存 -> onFileSave -> workbenchStore.saveCurrentDocument()
+
+所以 EditorPanel 是典型的受控面板，状态真相不在组件里，而在 workbenchStore 背后的 stores。
+
+7. 预览面板怎么接状态
+
+/Users/bangxiao/Documents/bolt.new/app/components/workbench/Preview.tsx 只订阅 workbenchStore.previews。
+
+它根据预览列表：
+- 选中当前端口
+- 显示地址栏
+- 把 baseUrl 塞进 iframe
+- 支持刷新 iframe
+- 如果有多个端口，用 /Users/bangxiao/Documents/bolt.new/app/components/workbench/PortDropdown.tsx 选择
+
+所以预览组件其实非常“薄”，核心状态都已经由 PreviewsStore 准备好了。
+
+8. 终端组件怎么接状态
+
+终端 UI 在 EditorPanel 里，通过 Terminal 挂载。
+当 Terminal ready 后，会回调 onTerminalReady，再进入 workbenchStore.attachTerminal()，最终到 /Users/bangxiao/Documents/bolt.new/app/lib/stores/terminal.ts。
+
+所以终端组件本身只负责显示和输入采集，真正的 shell 进程生命周期在 store 层。
+
+9. 侧边栏怎么接持久化
+
+左侧滑出菜单在 /Users/bangxiao/Documents/bolt.new/app/components/sidebar/Menu.client.tsx。
+
+它不依赖 workbenchStore，而是直接依赖持久化层：
+- db
+- getAll
+- deleteById
+- chatId
+
+这些都来自 /Users/bangxiao/Documents/bolt.new/app/lib/persistence/db.ts 和 /Users/bangxiao/Documents/bolt.new/app/lib/persistence/useChatHistory.ts。
+
+也就是说，侧边栏是另一套独立子系统：
+- 聊天主区依赖实时消息和 workbench
+- 侧边栏依赖 IndexedDB 历史会话
+
+10. 整个组件依赖图怎么理解
+
+可以把组件关系压缩成这张图：
+
+_index.tsx
+-> Chat.client.tsx
+-> BaseChat.tsx
+-> Messages.client.tsx
+-> AssistantMessage.tsx
+-> Markdown.tsx
+-> Artifact.tsx
+
+同时：
+
+BaseChat.tsx
+-> Workbench.client.tsx
+-> EditorPanel.tsx
+-> FileTree / FileBreadcrumb / CodeMirror / Terminal
+
+以及：
+
+Workbench.client.tsx
+-> Preview.tsx
+
+还有一条独立线：
+
+BaseChat.tsx
+-> Menu.client.tsx
+-> 历史会话列表
+
+一句话总结组件层
+
+这个 repo 的组件组织方式可以概括成：
+
+- Chat.client.tsx 是数据入口
+- BaseChat.tsx 是页面骨架
+- Markdown.tsx + Artifact.tsx 负责把 AI 输出转成可视化执行结果
+- Workbench.client.tsx 是 IDE 容器
+- EditorPanel.tsx 和 Preview.tsx 分别承接代码与运行结果
+- 侧边栏是独立的历史会话系统
