@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "declaration": true,
+    "declarationMap": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "baseUrl": ".",
+    "paths": {
+      "@ezu/core": [
+        "packages/core/src/index.ts"
+      ],
+      "@ezu/model-gateway": [
+        "packages/model-gateway/src/index.ts"
+      ],
+      "@ezu/protocol": [
+        "packages/protocol/src/index.ts"
+      ],
+      "@ezu/runtime-browser": [
+        "packages/runtime-browser/src/index.ts"
+      ],
+      "@ezu/runtime-remote": [
+        "packages/runtime-remote/src/index.ts"
+      ],
+      "@ezu/ui": [
+        "packages/ui/src/index.ts"
+      ]
+    }
+  }
+}

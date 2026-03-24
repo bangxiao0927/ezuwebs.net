@@ -1,0 +1,18 @@
+{
+  "name": "@ezu/agent",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@ezu/core": "workspace:*",
+    "@ezu/model-gateway": "workspace:*",
+    "@ezu/protocol": "workspace:*",
+    "@ezu/runtime-browser": "workspace:*"
+  }
+}
