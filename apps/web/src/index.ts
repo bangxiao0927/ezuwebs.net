@@ -286,6 +286,30 @@ function renderPlanStatus(status: string): string {
   return status.replaceAll("_", " ");
 }
 
+function summarizeAction(action: WorkbenchViewModel["actions"][number]["action"]): string {
+  if (action.type === "file.write") {
+    return `Write ${action.path}`;
+  }
+
+  if (action.type === "file.patch") {
+    return `Patch ${action.path}`;
+  }
+
+  if (action.type === "command.run") {
+    return `Run ${action.command}`;
+  }
+
+  if (action.type === "preview.open") {
+    return `Open preview on port ${String(action.port ?? "unknown")}`;
+  }
+
+  if (action.type === "interaction.choice") {
+    return action.question;
+  }
+
+  return action.title;
+}
+
 function renderPendingInteraction(interaction: PendingInteraction | undefined): string {
   if (!interaction) {
     return `<div class="empty-state">No pending interaction</div>`;
@@ -820,7 +844,7 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
                               <span class="pill status">${escapeHtml(action.status)}</span>
                             </div>
                             <h3>${escapeHtml(action.action.type)}</h3>
-                            <p>${escapeHtml(JSON.stringify(action.action))}</p>
+                            <p>${escapeHtml(summarizeAction(action.action))}</p>
                           </li>
                         `,
                       )

@@ -61,7 +61,7 @@ export async function bootstrapBlockEditDemo(
       {
         id: crypto.randomUUID(),
         title: "Generate a block-scoped patch action",
-        description: "Produce a safe file.write demo action from the block editor request.",
+        description: "Produce a safe file.patch demo action from the block editor request.",
         status: "in_progress",
       },
       {
@@ -89,14 +89,15 @@ export async function bootstrapBlockEditDemo(
   const fileAction = createTimelineAction({
     source: "coder",
     action: {
-      type: "file.write",
+      type: "file.patch",
       path: options.targetPath,
-      content: [
-        `// Block edit demo for ${options.blockId}`,
-        "export const blockEditPreview = {",
+      patch: [
+        `// block-edit:${options.blockId}`,
+        "export const blockEditPatchPreview = {",
         `  blockId: '${options.blockId}',`,
+        `  targetPath: '${options.targetPath}',`,
         `  prompt: ${JSON.stringify(options.suggestedPrompt)},`,
-        `  plannerModel: '${gateway.getProfile().planning.model}',`,
+        `  coderModel: '${gateway.getProfile().coding.model}',`,
         "};",
       ].join("\n"),
     },
