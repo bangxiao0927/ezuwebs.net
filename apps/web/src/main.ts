@@ -79,6 +79,38 @@ export async function mountDemoApp(target: HTMLElement = document.body): Promise
       });
     });
 
+    target.querySelectorAll<HTMLButtonElement>("[data-approval-decision]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const decision = button.dataset.approvalDecision;
+
+        if (!decision) {
+          return;
+        }
+
+        const approvalEvent = bootstrap.initialEvents
+          .slice()
+          .reverse()
+          .find(
+            (event): event is Extract<WebAppBootstrap["initialEvents"][number], { type: "interaction.required" }> =>
+              event.type === "interaction.required",
+          );
+        const selectedTitle =
+          approvalEvent?.interaction.type === "confirm"
+            ? approvalEvent.interaction.title
+            : "Patch review";
+
+        bootstrap.approvalDecision = {
+          status: decision === "approved" ? "approved" : "rejected",
+          title: selectedTitle,
+          summary:
+            decision === "approved"
+              ? "The current patch has been approved in the demo flow."
+              : "The current patch has been rejected in the demo flow.",
+        };
+        render();
+      });
+    });
+
     const form = target.querySelector<HTMLFormElement>("[data-editor-form='interactive-web-editor']");
 
     if (!form) {
@@ -128,6 +160,7 @@ export async function mountDemoApp(target: HTMLElement = document.body): Promise
       }
 
       bootstrap.initialEvents = [...bootstrap.initialEvents, ...agentEvents];
+      delete bootstrap.approvalDecision;
       const latestPatchAction = [...agentEvents]
         .reverse()
         .find((event) => event.type === "action.created" && event.action.action.type === "file.patch");

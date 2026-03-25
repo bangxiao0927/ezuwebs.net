@@ -22,6 +22,7 @@ export interface WebAppBootstrap {
   projectId: string;
   webEditor?: Partial<InteractiveWebEditorState>;
   selectedDiffActionId?: string;
+  approvalDecision?: ApprovalDecisionState;
 }
 
 export interface WorkbenchViewModel {
@@ -36,6 +37,13 @@ export interface WorkbenchViewModel {
   selectedBlockFile?: string;
   patchActions: PatchActionState[];
   selectedDiffAction?: PatchActionState;
+  approvalDecision?: ApprovalDecisionState;
+}
+
+export interface ApprovalDecisionState {
+  status: "approved" | "rejected";
+  title: string;
+  summary: string;
 }
 
 export interface WebAppEventState {
@@ -126,7 +134,7 @@ export function createWorkbenchViewModel(input: WebAppBootstrap): WorkbenchViewM
     })),
     plan: state.plan,
     actions: state.actions,
-    pendingInteraction: state.pendingInteraction,
+    pendingInteraction: input.approvalDecision ? undefined : state.pendingInteraction,
     files: state.runtime.files,
     previews: state.runtime.openPorts,
     webEditor,
@@ -134,6 +142,7 @@ export function createWorkbenchViewModel(input: WebAppBootstrap): WorkbenchViewM
     ...(selectedBlockFile ? { selectedBlockFile } : {}),
     patchActions,
     ...(selectedDiffAction ? { selectedDiffAction } : {}),
+    ...(input.approvalDecision ? { approvalDecision: input.approvalDecision } : {}),
   };
 }
 
@@ -502,13 +511,36 @@ function renderDiffPanel(workbench: WorkbenchViewModel): string {
     return `<div class="empty-state">No patch action available yet</div>`;
   }
 
-  const approvalCard =
+  const approvalActions =
     workbench.pendingInteraction?.type === "confirm"
+      ? `
+        <div class="approval-actions">
+          <button type="button" class="approval-button approve-button" data-approval-decision="approved">
+            Approve Patch
+          </button>
+          <button type="button" class="approval-button reject-button" data-approval-decision="rejected">
+            Reject Patch
+          </button>
+        </div>
+      `
+      : "";
+
+  const approvalCard =
+    workbench.approvalDecision
+      ? `
+        <div class="card ${workbench.approvalDecision.status === "approved" ? "approval-success-card" : "approval-reject-card"}">
+          <p class="eyebrow">${escapeHtml(workbench.approvalDecision.status)}</p>
+          <h3>${escapeHtml(workbench.approvalDecision.title)}</h3>
+          <p>${escapeHtml(workbench.approvalDecision.summary)}</p>
+        </div>
+      `
+      : workbench.pendingInteraction?.type === "confirm"
       ? `
         <div class="card approval-card">
           <p class="eyebrow">Approval Required</p>
           <h3>${escapeHtml(workbench.pendingInteraction.title)}</h3>
           <p>${escapeHtml(workbench.pendingInteraction.summary)}</p>
+          ${approvalActions}
         </div>
       `
       : "";
@@ -813,6 +845,41 @@ export const webAppStyles = `
   .approval-card {
     background: linear-gradient(180deg, rgba(179, 84, 30, 0.14), rgba(255, 250, 240, 0.96));
     border-color: rgba(179, 84, 30, 0.28);
+  }
+
+  .approval-success-card {
+    background: linear-gradient(180deg, rgba(56, 102, 65, 0.16), rgba(255, 250, 240, 0.96));
+    border-color: rgba(56, 102, 65, 0.28);
+  }
+
+  .approval-reject-card {
+    background: linear-gradient(180deg, rgba(140, 46, 36, 0.14), rgba(255, 250, 240, 0.96));
+    border-color: rgba(140, 46, 36, 0.22);
+  }
+
+  .approval-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+
+  .approval-button {
+    border: 0;
+    border-radius: 999px;
+    padding: 10px 14px;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .approve-button {
+    background: #386641;
+    color: #fffaf0;
+  }
+
+  .reject-button {
+    background: #8c2e24;
+    color: #fffaf0;
   }
 
   .code-block pre {
