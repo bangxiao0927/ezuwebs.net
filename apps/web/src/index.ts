@@ -27,6 +27,8 @@ export interface WorkbenchViewModel {
   files: string[];
   previews: WebAppEventState["runtime"]["openPorts"];
   webEditor: InteractiveWebEditorState;
+  selectedBlock?: WebEditorBlock;
+  selectedBlockFile?: string;
 }
 
 export interface WebAppEventState {
@@ -98,6 +100,9 @@ export function reduceWorkbenchEvents(
 
 export function createWorkbenchViewModel(input: WebAppBootstrap): WorkbenchViewModel {
   const state = reduceWorkbenchEvents(input);
+  const webEditor = createInteractiveWebEditorState(input.webEditor);
+  const selectedBlock =
+    webEditor.blocks.find((block) => block.id === webEditor.selectedBlockId) ?? webEditor.blocks[0];
 
   return {
     chatMessages: state.messages.map((message) => ({
@@ -110,7 +115,9 @@ export function createWorkbenchViewModel(input: WebAppBootstrap): WorkbenchViewM
     pendingInteraction: state.pendingInteraction,
     files: state.runtime.files,
     previews: state.runtime.openPorts,
-    webEditor: createInteractiveWebEditorState(input.webEditor),
+    webEditor,
+    selectedBlock,
+    selectedBlockFile: selectedBlock ? getWebEditorBlockFile(selectedBlock.id) : undefined,
   };
 }
 
@@ -248,6 +255,22 @@ export function upsertInteractiveWebEditorProperty(
         )
       : [...state.properties, nextProperty],
   });
+}
+
+export function getWebEditorBlockFile(blockId: string): string {
+  if (blockId === "hero") {
+    return "apps/web/src/index.ts";
+  }
+
+  if (blockId === "conversation") {
+    return "apps/agent/src/index.ts";
+  }
+
+  if (blockId === "workbench") {
+    return "apps/web/src/main.ts";
+  }
+
+  return "apps/web/src/index.ts";
 }
 
 function escapeHtml(value: string): string {
@@ -394,6 +417,38 @@ function renderWebEditor(state: InteractiveWebEditorState): string {
         <p>${escapeHtml(state.suggestedPrompt ?? "Submit an edit request to generate a block-scoped prompt.")}</p>
       </div>
     </section>
+  `;
+}
+
+function renderPreviewSelection(state: InteractiveWebEditorState): string {
+  const selectedBlock =
+    state.blocks.find((block) => block.id === state.selectedBlockId) ?? state.blocks[0];
+
+  return `
+    <div class="card preview-surface">
+      <p class="eyebrow">Preview Surface</p>
+      <div class="preview-stack">
+        ${state.blocks
+          .map(
+            (block) => `
+              <button
+                type="button"
+                class="preview-block ${block.id === state.selectedBlockId ? "preview-block-active" : ""}"
+                data-preview-block-id="${escapeHtml(block.id)}"
+              >
+                <span class="preview-block-label">${escapeHtml(block.label)}</span>
+                <span class="preview-block-path">${escapeHtml(block.selector)}</span>
+              </button>
+            `,
+          )
+          .join("")}
+      </div>
+      <div class="card preview-detail">
+        <p class="eyebrow">Selected Block</p>
+        <h3>${escapeHtml(selectedBlock?.label ?? "No block selected")}</h3>
+        <p>${escapeHtml(selectedBlock?.html ?? "No HTML snapshot")}</p>
+      </div>
+    </div>
   `;
 }
 
@@ -596,6 +651,50 @@ export const webAppStyles = `
     cursor: pointer;
   }
 
+  .preview-surface {
+    display: grid;
+    gap: 12px;
+    min-height: 100%;
+  }
+
+  .preview-stack {
+    display: grid;
+    gap: 10px;
+  }
+
+  .preview-block {
+    border: 1px solid rgba(95, 85, 69, 0.18);
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(255, 250, 240, 0.96), rgba(241, 232, 211, 0.68));
+    padding: 14px;
+    text-align: left;
+    cursor: pointer;
+    display: grid;
+    gap: 6px;
+    font: inherit;
+    color: inherit;
+  }
+
+  .preview-block-active {
+    border-color: rgba(179, 84, 30, 0.45);
+    background: linear-gradient(180deg, rgba(246, 216, 184, 0.92), rgba(255, 250, 240, 0.98));
+    box-shadow: inset 0 0 0 1px rgba(179, 84, 30, 0.15);
+  }
+
+  .preview-block-label {
+    font-family: "Avenir Next Condensed", "Franklin Gothic Medium", sans-serif;
+    color: var(--ink);
+  }
+
+  .preview-block-path {
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .preview-detail {
+    background: rgba(255, 250, 240, 0.78);
+  }
+
   .subgrid {
     display: grid;
     gap: 14px;
@@ -741,31 +840,46 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
             <div class="card">
               <p class="eyebrow">FileTree</p>
               <ul class="message-list">
-                ${workbench.files.length > 0
-                  ? workbench.files.map((file) => `<li>${escapeHtml(file)}</li>`).join("")
-                  : `<li class="empty-state">No files changed yet</li>`}
+                ${[...new Set([...workbench.files, ...(workbench.selectedBlockFile ? [workbench.selectedBlockFile] : [])])]
+                  .map(
+                    (file) => `
+                      <li class="${file === workbench.selectedBlockFile ? "selected-item" : ""}">
+                        ${escapeHtml(file)}
+                      </li>
+                    `,
+                  )
+                  .join("")}
               </ul>
             </div>
             <div class="card">
               <p class="eyebrow">PreviewPanel</p>
-              <ul class="message-list">
-                ${workbench.previews.length > 0
-                  ? workbench.previews
-                      .map(
-                        (preview) => `
-                          <li>
-                            <strong>${escapeHtml(preview.url)}</strong>
-                            <p>Port ${escapeHtml(String(preview.port))}</p>
-                          </li>
-                        `,
-                      )
-                      .join("")
-                  : `<li class="empty-state">No live preview yet</li>`}
-              </ul>
+              ${
+                workbench.previews.length > 0
+                  ? `
+                    <ul class="message-list">
+                      ${workbench.previews
+                        .map(
+                          (preview) => `
+                            <li>
+                              <strong>${escapeHtml(preview.url)}</strong>
+                              <p>Port ${escapeHtml(String(preview.port))}</p>
+                            </li>
+                          `,
+                        )
+                        .join("")}
+                    </ul>
+                    ${renderPreviewSelection(workbench.webEditor)}
+                  `
+                  : `<div class="empty-state">No live preview yet</div>`
+              }
             </div>
             <div class="card">
               <p class="eyebrow">EditorPanel</p>
-              <p>Use this slot for a code editor bound to the active file selection.</p>
+              <p>${escapeHtml(
+                workbench.selectedBlock
+                  ? `Focused block: ${workbench.selectedBlock.label} -> ${workbench.selectedBlock.selector}`
+                  : "Use this slot for a code editor bound to the active file selection.",
+              )}</p>
             </div>
             <div class="card">
               <p class="eyebrow">TerminalPanel</p>

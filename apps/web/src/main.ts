@@ -50,6 +50,16 @@ export function mountDemoApp(target: HTMLElement = document.body): void {
       });
     });
 
+    target.querySelectorAll<HTMLButtonElement>("[data-preview-block-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        bootstrap.webEditor = selectInteractiveWebEditorBlock(
+          bootstrap.webEditor ?? createInteractiveWebEditorState(),
+          button.dataset.previewBlockId ?? "",
+        );
+        render();
+      });
+    });
+
     const form = target.querySelector<HTMLFormElement>("[data-editor-form='interactive-web-editor']");
 
     if (!form) {
