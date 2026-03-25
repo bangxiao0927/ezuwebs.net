@@ -4,7 +4,11 @@ import {
   rightWorkbenchPanels,
   workspacePanelLabels,
 } from "@ezu/ui";
-import { type AgentEvent, type PendingInteraction } from "@ezu/protocol";
+import { type ActionState, type AgentEvent, type PendingInteraction } from "@ezu/protocol";
+
+export type PatchActionState = ActionState & {
+  action: Extract<ActionState["action"], { type: "file.patch" }>;
+};
 
 export interface WebAppShellConfig {
   projectName: string;
@@ -17,6 +21,7 @@ export interface WebAppBootstrap {
   sessionId: string;
   projectId: string;
   webEditor?: Partial<InteractiveWebEditorState>;
+  selectedDiffActionId?: string;
 }
 
 export interface WorkbenchViewModel {
@@ -29,6 +34,8 @@ export interface WorkbenchViewModel {
   webEditor: InteractiveWebEditorState;
   selectedBlock?: WebEditorBlock;
   selectedBlockFile?: string;
+  patchActions: PatchActionState[];
+  selectedDiffAction?: PatchActionState;
 }
 
 export interface WebAppEventState {
@@ -104,6 +111,12 @@ export function createWorkbenchViewModel(input: WebAppBootstrap): WorkbenchViewM
   const selectedBlock =
     webEditor.blocks.find((block) => block.id === webEditor.selectedBlockId) ?? webEditor.blocks[0];
   const selectedBlockFile = selectedBlock ? getWebEditorBlockFile(selectedBlock.id) : undefined;
+  const patchActions = state.actions.filter(
+    (action): action is PatchActionState => action.action.type === "file.patch",
+  );
+  const selectedDiffAction =
+    patchActions.find((action) => action.id === input.selectedDiffActionId) ??
+    patchActions[patchActions.length - 1];
 
   return {
     chatMessages: state.messages.map((message) => ({
@@ -119,6 +132,8 @@ export function createWorkbenchViewModel(input: WebAppBootstrap): WorkbenchViewM
     webEditor,
     ...(selectedBlock ? { selectedBlock } : {}),
     ...(selectedBlockFile ? { selectedBlockFile } : {}),
+    patchActions,
+    ...(selectedDiffAction ? { selectedDiffAction } : {}),
   };
 }
 
@@ -311,6 +326,11 @@ function summarizeAction(action: WorkbenchViewModel["actions"][number]["action"]
   return action.title;
 }
 
+function summarizePatch(action: PatchActionState): string {
+  const firstLine = action.action.patch.split("\n").find((line) => line.trim().length > 0);
+  return firstLine ?? action.action.patch;
+}
+
 function renderPendingInteraction(interaction: PendingInteraction | undefined): string {
   if (!interaction) {
     return `<div class="empty-state">No pending interaction</div>`;
@@ -472,6 +492,47 @@ function renderPreviewSelection(state: InteractiveWebEditorState): string {
         <p class="eyebrow">Selected Block</p>
         <h3>${escapeHtml(selectedBlock?.label ?? "No block selected")}</h3>
         <p>${escapeHtml(selectedBlock?.html ?? "No HTML snapshot")}</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderDiffPanel(workbench: WorkbenchViewModel): string {
+  if (!workbench.selectedDiffAction) {
+    return `<div class="empty-state">No patch action available yet</div>`;
+  }
+
+  return `
+    <div class="stack">
+      <div class="card diff-header">
+        <p class="eyebrow">Current Patch</p>
+        <h3>${escapeHtml(workbench.selectedDiffAction.action.path)}</h3>
+        <p>${escapeHtml(summarizePatch(workbench.selectedDiffAction))}</p>
+      </div>
+      <div class="card">
+        <p class="eyebrow">Patch Actions</p>
+        <ul class="message-list">
+          ${workbench.patchActions
+            .map(
+              (action) => `
+                <li class="${action.id === workbench.selectedDiffAction?.id ? "selected-item" : ""}">
+                  <button
+                    type="button"
+                    class="timeline-action-button"
+                    data-diff-action-id="${escapeHtml(action.id)}"
+                  >
+                    <strong>${escapeHtml(action.action.path)}</strong>
+                    <span>${escapeHtml(action.status)}</span>
+                  </button>
+                </li>
+              `,
+            )
+            .join("")}
+        </ul>
+      </div>
+      <div class="card code-block">
+        <p class="eyebrow">Patch Content</p>
+        <pre>${escapeHtml(workbench.selectedDiffAction.action.patch)}</pre>
       </div>
     </div>
   `;
@@ -720,6 +781,34 @@ export const webAppStyles = `
     background: rgba(255, 250, 240, 0.78);
   }
 
+  .timeline-action-button {
+    width: 100%;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    text-align: left;
+    color: inherit;
+    display: grid;
+    gap: 4px;
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .diff-header {
+    background: linear-gradient(180deg, rgba(246, 216, 184, 0.82), rgba(255, 250, 240, 0.96));
+  }
+
+  .code-block pre {
+    margin: 0;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: "SFMono-Regular", "Menlo", monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--ink);
+  }
+
   .subgrid {
     display: grid;
     gap: 14px;
@@ -839,13 +928,28 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
                   ? workbench.actions
                       .map(
                         (action) => `
-                          <li class="card">
+                          <li class="card ${action.id === workbench.selectedDiffAction?.id ? "selected-item" : ""}">
                             <div class="pill-row">
                               <span class="pill">${escapeHtml(action.source)}</span>
                               <span class="pill status">${escapeHtml(action.status)}</span>
                             </div>
-                            <h3>${escapeHtml(action.action.type)}</h3>
-                            <p>${escapeHtml(summarizeAction(action.action))}</p>
+                            ${
+                              action.action.type === "file.patch"
+                                ? `
+                                  <button
+                                    type="button"
+                                    class="timeline-action-button"
+                                    data-diff-action-id="${escapeHtml(action.id)}"
+                                  >
+                                    <h3>${escapeHtml(action.action.type)}</h3>
+                                    <p>${escapeHtml(summarizeAction(action.action))}</p>
+                                  </button>
+                                `
+                                : `
+                                  <h3>${escapeHtml(action.action.type)}</h3>
+                                  <p>${escapeHtml(summarizeAction(action.action))}</p>
+                                `
+                            }
                           </li>
                         `,
                       )
@@ -912,7 +1016,7 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
             </div>
             <div class="card">
               <p class="eyebrow">DiffPanel</p>
-              <p>Diff summaries will attach to action metadata in a later iteration.</p>
+              ${renderDiffPanel(workbench)}
             </div>
           </div>
         </section>

@@ -65,6 +65,20 @@ export async function mountDemoApp(target: HTMLElement = document.body): Promise
       });
     });
 
+    target.querySelectorAll<HTMLButtonElement>("[data-diff-action-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const diffActionId = button.dataset.diffActionId;
+
+        if (diffActionId) {
+          bootstrap.selectedDiffActionId = diffActionId;
+        } else {
+          delete bootstrap.selectedDiffActionId;
+        }
+
+        render();
+      });
+    });
+
     const form = target.querySelector<HTMLFormElement>("[data-editor-form='interactive-web-editor']");
 
     if (!form) {
@@ -114,6 +128,14 @@ export async function mountDemoApp(target: HTMLElement = document.body): Promise
       }
 
       bootstrap.initialEvents = [...bootstrap.initialEvents, ...agentEvents];
+      const latestPatchAction = [...agentEvents]
+        .reverse()
+        .find((event) => event.type === "action.created" && event.action.action.type === "file.patch");
+
+      if (latestPatchAction && latestPatchAction.type === "action.created") {
+        bootstrap.selectedDiffActionId = latestPatchAction.action.id;
+      }
+
       render();
     });
   };
