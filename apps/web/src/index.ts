@@ -502,8 +502,20 @@ function renderDiffPanel(workbench: WorkbenchViewModel): string {
     return `<div class="empty-state">No patch action available yet</div>`;
   }
 
+  const approvalCard =
+    workbench.pendingInteraction?.type === "confirm"
+      ? `
+        <div class="card approval-card">
+          <p class="eyebrow">Approval Required</p>
+          <h3>${escapeHtml(workbench.pendingInteraction.title)}</h3>
+          <p>${escapeHtml(workbench.pendingInteraction.summary)}</p>
+        </div>
+      `
+      : "";
+
   return `
     <div class="stack">
+      ${approvalCard}
       <div class="card diff-header">
         <p class="eyebrow">Current Patch</p>
         <h3>${escapeHtml(workbench.selectedDiffAction.action.path)}</h3>
@@ -796,6 +808,11 @@ export const webAppStyles = `
 
   .diff-header {
     background: linear-gradient(180deg, rgba(246, 216, 184, 0.82), rgba(255, 250, 240, 0.96));
+  }
+
+  .approval-card {
+    background: linear-gradient(180deg, rgba(179, 84, 30, 0.14), rgba(255, 250, 240, 0.96));
+    border-color: rgba(179, 84, 30, 0.28);
   }
 
   .code-block pre {

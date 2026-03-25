@@ -62,7 +62,15 @@ export async function bootstrapBlockEditDemo(
         id: crypto.randomUUID(),
         title: "Generate a block-scoped patch action",
         description: "Produce a safe file.patch demo action from the block editor request.",
+        status: "completed",
+        requiresApproval: true,
+      },
+      {
+        id: crypto.randomUUID(),
+        title: "Review and confirm the patch",
+        description: "Flag the block-scoped patch for user confirmation before replaying it.",
         status: "in_progress",
+        requiresApproval: true,
       },
       {
         id: crypto.randomUUID(),
@@ -100,6 +108,16 @@ export async function bootstrapBlockEditDemo(
         `  coderModel: '${gateway.getProfile().coding.model}',`,
         "};",
       ].join("\n"),
+    },
+  });
+
+  session = applyEvent(session, events, {
+    type: "interaction.required",
+    interaction: {
+      type: "confirm",
+      id: crypto.randomUUID(),
+      title: `Review patch for ${options.blockId}`,
+      summary: `This patch updates ${options.targetPath}. Confirm the block-scoped edit before applying it to the runtime replay.`,
     },
   });
 
