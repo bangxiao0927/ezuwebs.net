@@ -103,6 +103,7 @@ export function createWorkbenchViewModel(input: WebAppBootstrap): WorkbenchViewM
   const webEditor = createInteractiveWebEditorState(input.webEditor);
   const selectedBlock =
     webEditor.blocks.find((block) => block.id === webEditor.selectedBlockId) ?? webEditor.blocks[0];
+  const selectedBlockFile = selectedBlock ? getWebEditorBlockFile(selectedBlock.id) : undefined;
 
   return {
     chatMessages: state.messages.map((message) => ({
@@ -116,8 +117,8 @@ export function createWorkbenchViewModel(input: WebAppBootstrap): WorkbenchViewM
     files: state.runtime.files,
     previews: state.runtime.openPorts,
     webEditor,
-    selectedBlock,
-    selectedBlockFile: selectedBlock ? getWebEditorBlockFile(selectedBlock.id) : undefined,
+    ...(selectedBlock ? { selectedBlock } : {}),
+    ...(selectedBlockFile ? { selectedBlockFile } : {}),
   };
 }
 
@@ -153,7 +154,7 @@ export function createInteractiveWebEditorState(
   const selectedBlock = blocks.find((block) => block.id === selectedBlockId) ?? blocks[0];
 
   return {
-    selectedBlockId,
+    ...(selectedBlockId ? { selectedBlockId } : {}),
     blocks,
     properties:
       overrides.properties ??

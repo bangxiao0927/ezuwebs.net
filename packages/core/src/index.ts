@@ -5,6 +5,7 @@ import {
   type ConversationMessage,
   type PendingInteraction,
   type PlanStep,
+  type RuntimePort,
   type RuntimeSnapshot,
   type SessionState,
 } from "@ezu/protocol";
@@ -203,15 +204,13 @@ export function applyAgentEvent(session: SessionState, event: AgentEvent): Sessi
 
   if (event.type === "preview.ready") {
     const remainingPorts = session.runtime.openPorts.filter((port) => port.port !== event.port);
+    const nextPort: RuntimePort = { port: event.port, url: event.url, status: "open" };
 
     return {
       ...session,
       runtime: {
         ...session.runtime,
-        openPorts: [
-          ...remainingPorts,
-          { port: event.port, url: event.url, status: "open" },
-        ].sort((left, right) => left.port - right.port),
+        openPorts: [...remainingPorts, nextPort].sort((left, right) => left.port - right.port),
       },
       updatedAt,
     };
@@ -296,9 +295,10 @@ export function createExecutor(input: {
       }
 
       if (action.action.type === "command.run") {
-        await input.runtime.runCommand(action.action.command, {
-          cwd: action.action.cwd,
-        });
+        await input.runtime.runCommand(
+          action.action.command,
+          action.action.cwd ? { cwd: action.action.cwd } : undefined,
+        );
       }
 
       return {

@@ -28,8 +28,9 @@ function ensureStyles(documentRef: Document): void {
 }
 
 function getSelectedBlock(bootstrap: WebAppBootstrap) {
-  const blocks = bootstrap.webEditor?.blocks ?? [];
-  const selectedBlockId = bootstrap.webEditor?.selectedBlockId;
+  const editorState = createInteractiveWebEditorState(bootstrap.webEditor);
+  const blocks = editorState.blocks;
+  const selectedBlockId = editorState.selectedBlockId;
 
   return blocks.find((block) => block.id === selectedBlockId) ?? blocks[0];
 }
@@ -47,7 +48,7 @@ export async function mountDemoApp(target: HTMLElement = document.body): Promise
     target.querySelectorAll<HTMLButtonElement>("[data-block-id]").forEach((button) => {
       button.addEventListener("click", () => {
         bootstrap.webEditor = selectInteractiveWebEditorBlock(
-          bootstrap.webEditor ?? createInteractiveWebEditorState(),
+          createInteractiveWebEditorState(bootstrap.webEditor),
           button.dataset.blockId ?? "",
         );
         render();
@@ -57,7 +58,7 @@ export async function mountDemoApp(target: HTMLElement = document.body): Promise
     target.querySelectorAll<HTMLButtonElement>("[data-preview-block-id]").forEach((button) => {
       button.addEventListener("click", () => {
         bootstrap.webEditor = selectInteractiveWebEditorBlock(
-          bootstrap.webEditor ?? createInteractiveWebEditorState(),
+          createInteractiveWebEditorState(bootstrap.webEditor),
           button.dataset.previewBlockId ?? "",
         );
         render();
@@ -84,15 +85,13 @@ export async function mountDemoApp(target: HTMLElement = document.body): Promise
         intent: String(formData.get("intent") ?? ""),
         patchStrategy:
           (String(formData.get("patchStrategy") ?? "refine") as InteractiveWebEditRequest["patchStrategy"]),
-        properties: (bootstrap.webEditor?.properties ?? []).map((property) => ({
+        properties: createInteractiveWebEditorState(bootstrap.webEditor).properties.map((property) => ({
           ...property,
           value: String(formData.get(`property:${property.key}`) ?? property.value),
         })),
       };
 
-      let nextState = bootstrap.webEditor ?? {
-        ...createInteractiveWebEditorState(),
-      };
+      let nextState = createInteractiveWebEditorState(bootstrap.webEditor);
 
       for (const property of request.properties ?? []) {
         nextState = upsertInteractiveWebEditorProperty(nextState, property);

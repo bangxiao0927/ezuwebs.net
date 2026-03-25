@@ -170,6 +170,7 @@ export async function bootstrapAgentApp(options: AgentAppOptions): Promise<Agent
       ].join("\n"),
     },
   });
+  const generatedBootstrapPath = "apps/web/src/generated-bootstrap.ts";
 
   const previewAction = createTimelineAction({
     source: "system",
@@ -196,7 +197,7 @@ export async function bootstrapAgentApp(options: AgentAppOptions): Promise<Agent
 
   const fileChangedEvent: AgentEvent = {
     type: "file.changed",
-    path: fileAction.action.path,
+    path: generatedBootstrapPath,
   };
   events.push(fileChangedEvent);
   session = applyAgentEvent(session, fileChangedEvent);
