@@ -36,6 +36,16 @@ function getSelectedBlock(bootstrap: WebAppBootstrap) {
   return blocks.find((block) => block.id === selectedBlockId) ?? blocks[0];
 }
 
+function createReplacementPrompt(basePrompt: string, rejectionReason: string): string {
+  return [
+    basePrompt,
+    `Rejected because: ${rejectionReason}.`,
+    "Redo the patch from scratch based on that rejection reason.",
+    "Do not reuse the previous structure if it conflicts with the rejection reason.",
+    "Make the replacement visibly address the cited issue instead of applying a generic template.",
+  ].join(" ");
+}
+
 export async function mountDemoApp(target: HTMLElement = document.body): Promise<void> {
   const bootstrap = await createDemoBootstrap();
   const documentRef = target.ownerDocument;
@@ -83,8 +93,16 @@ export async function mountDemoApp(target: HTMLElement = document.body): Promise
     target.querySelectorAll<HTMLButtonElement>("[data-approval-decision]").forEach((button) => {
       button.addEventListener("click", async () => {
         const decision = button.dataset.approvalDecision;
+        const rejectionReasonInput = target.querySelector<HTMLTextAreaElement>("[data-reject-reason]");
+        const rejectionReason = rejectionReasonInput?.value.trim() ?? "";
 
         if (!decision) {
+          return;
+        }
+
+        if (decision === "rejected" && !rejectionReason) {
+          window.alert("Reject reason is required before creating a replacement patch.");
+          rejectionReasonInput?.focus();
           return;
         }
 
@@ -121,7 +139,8 @@ export async function mountDemoApp(target: HTMLElement = document.body): Promise
             summary:
               decision === "approved"
                 ? `Approved: ${selectedSummary}`
-                : `Rejected: ${selectedSummary}`,
+                : `Rejected: ${selectedSummary}${rejectionReason ? ` Reason: ${rejectionReason}` : ""}`,
+            ...(decision === "rejected" ? { rejectionReason } : {}),
             ...(decision === "rejected"
               ? { followUpStrategy: "replace_structure" as const }
               : {}),
@@ -146,8 +165,13 @@ export async function mountDemoApp(target: HTMLElement = document.body): Promise
             projectId: bootstrap.projectId,
             blockId: selectedBlock.id,
             targetPath: getWebEditorBlockFile(selectedBlock.id),
-            suggestedPrompt: `${createInteractiveWebEditorState(bootstrap.webEditor).suggestedPrompt ?? "Replace the rejected block structure."} Replace the structure instead of revising the previous patch.`,
+            suggestedPrompt: createReplacementPrompt(
+              createInteractiveWebEditorState(bootstrap.webEditor).suggestedPrompt ??
+                "Replace the rejected block structure.",
+              rejectionReason,
+            ),
             rejectedPatch: selectedPatch.action.patch,
+            rejectionReason,
           });
 
           bootstrap.initialEvents = [...bootstrap.initialEvents, ...replacementEvents];

@@ -43,6 +43,7 @@ export interface ApprovalDecisionState {
   status: "approved" | "rejected";
   title: string;
   summary: string;
+  rejectionReason?: string;
   followUpStrategy?: "revise" | "replace_structure";
 }
 
@@ -111,6 +112,7 @@ export function reduceWorkbenchEvents(
         status: event.status,
         title: event.title,
         summary: event.summary,
+        ...(event.rejectionReason ? { rejectionReason: event.rejectionReason } : {}),
         ...(event.followUpStrategy ? { followUpStrategy: event.followUpStrategy } : {}),
       };
     }
@@ -527,6 +529,15 @@ function renderDiffPanel(workbench: WorkbenchViewModel): string {
   const approvalActions =
     workbench.pendingInteraction?.type === "confirm"
       ? `
+        <label class="approval-reason-field">
+          <span>Reject Reason</span>
+          <textarea
+            class="approval-reason-input"
+            data-reject-reason
+            rows="3"
+            placeholder="Explain what is wrong with this patch and what should change in the replacement."
+          ></textarea>
+        </label>
         <div class="approval-actions">
           <button type="button" class="approval-button approve-button" data-approval-decision="approved">
             Approve Patch
@@ -545,6 +556,11 @@ function renderDiffPanel(workbench: WorkbenchViewModel): string {
           <p class="eyebrow">${escapeHtml(workbench.approvalDecision.status)}</p>
           <h3>${escapeHtml(workbench.approvalDecision.title)}</h3>
           <p>${escapeHtml(workbench.approvalDecision.summary)}</p>
+          ${
+            workbench.approvalDecision.rejectionReason
+              ? `<p><strong>Reject reason:</strong> ${escapeHtml(workbench.approvalDecision.rejectionReason)}</p>`
+              : ""
+          }
           ${
             workbench.approvalDecision.followUpStrategy
               ? `<p>Follow-up: ${escapeHtml(workbench.approvalDecision.followUpStrategy)}</p>`
@@ -880,6 +896,31 @@ export const webAppStyles = `
     gap: 10px;
     margin-top: 12px;
     flex-wrap: wrap;
+  }
+
+  .approval-reason-field {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+    color: var(--ink);
+    font-size: 14px;
+  }
+
+  .approval-reason-input {
+    width: 100%;
+    min-height: 88px;
+    border-radius: 16px;
+    border: 1px solid rgba(140, 46, 36, 0.18);
+    background: rgba(255, 250, 240, 0.92);
+    padding: 12px 14px;
+    font: inherit;
+    color: inherit;
+    resize: vertical;
+  }
+
+  .approval-reason-input:focus {
+    outline: 2px solid rgba(179, 84, 30, 0.28);
+    outline-offset: 2px;
   }
 
   .approval-button {

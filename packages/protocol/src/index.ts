@@ -191,6 +191,7 @@ export const agentEventSchema = z.discriminatedUnion("type", [
     status: z.enum(["approved", "rejected"]),
     title: z.string(),
     summary: z.string(),
+    rejectionReason: z.string().optional(),
     followUpStrategy: z.enum(["revise", "replace_structure"]).optional(),
   }),
 ]);
