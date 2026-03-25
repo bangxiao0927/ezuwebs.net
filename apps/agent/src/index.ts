@@ -21,6 +21,10 @@ export interface BlockEditDemoOptions extends AgentAppOptions {
   suggestedPrompt: string;
 }
 
+export interface ReplacementBlockEditDemoOptions extends BlockEditDemoOptions {
+  rejectedPatch: string;
+}
+
 function applyEvent(session: ReturnType<typeof createSessionState>, events: AgentEvent[], event: AgentEvent) {
   events.push(event);
   return applyAgentEvent(session, event);
@@ -140,6 +144,107 @@ export async function bootstrapBlockEditDemo(
   session = applyEvent(session, events, {
     type: "preview.ready",
     url: `http://localhost:4173?block=${encodeURIComponent(options.blockId)}`,
+    port: 4173,
+  });
+
+  session = applyEvent(session, events, {
+    type: "message.completed",
+    messageId,
+  });
+
+  sessionStore.upsert(session);
+
+  return events;
+}
+
+export async function bootstrapReplacementBlockEditDemo(
+  options: ReplacementBlockEditDemoOptions,
+): Promise<AgentEvent[]> {
+  const sessionStore = createSessionStore();
+  let session = createSessionState({
+    id: options.sessionId,
+    projectId: options.projectId,
+  });
+  const events: AgentEvent[] = [];
+  const gateway = createModelGateway();
+  const runtime = createBrowserRuntimeStub();
+  const executor = createExecutor({ runtime, sessionStore });
+  const messageId = crypto.randomUUID();
+
+  session = applyEvent(session, events, {
+    type: "message.delta",
+    messageId,
+    text: `Planner is replacing the ${options.blockId} patch with a structural alternative after rejection.`,
+  });
+
+  session = applyEvent(session, events, {
+    type: "plan.updated",
+    plan: [
+      {
+        id: crypto.randomUUID(),
+        title: "Capture the rejected patch as failed context",
+        description: "Keep the rejected patch visible for audit and comparison.",
+        status: "completed",
+      },
+      {
+        id: crypto.randomUUID(),
+        title: `Replace the ${options.blockId} structure`,
+        description: `Generate a broader replacement patch for ${options.targetPath}.`,
+        status: "in_progress",
+      },
+      {
+        id: crypto.randomUUID(),
+        title: "Replay the replacement patch in the workbench",
+        description: "Attach the new structure patch to diff, timeline, and preview state.",
+        status: "pending",
+      },
+    ],
+  });
+
+  session = applyEvent(session, events, {
+    type: "message.delta",
+    messageId,
+    text: ` Replacement prompt: ${options.suggestedPrompt}`,
+  });
+
+  const replacementAction = createTimelineAction({
+    source: "coder",
+    action: {
+      type: "file.patch",
+      path: options.targetPath,
+      patch: [
+        `// replacement-structure:${options.blockId}`,
+        "export const replacementStructurePatchPreview = {",
+        `  blockId: '${options.blockId}',`,
+        `  targetPath: '${options.targetPath}',`,
+        "  strategy: 'replace_structure',",
+        `  previousPatchSummary: ${JSON.stringify(options.rejectedPatch.split("\n")[0] ?? "")},`,
+        `  prompt: ${JSON.stringify(options.suggestedPrompt)},`,
+        `  coderModel: '${gateway.getProfile().coding.model}',`,
+        "};",
+      ].join("\n"),
+    },
+  });
+
+  session = applyEvent(session, events, {
+    type: "action.created",
+    action: replacementAction,
+  });
+
+  const completedReplacementAction = await executor.enqueue(replacementAction);
+  session = applyEvent(session, events, {
+    type: "action.updated",
+    action: completedReplacementAction,
+  });
+
+  session = applyEvent(session, events, {
+    type: "file.changed",
+    path: options.targetPath,
+  });
+
+  session = applyEvent(session, events, {
+    type: "preview.ready",
+    url: `http://localhost:4173?block=${encodeURIComponent(options.blockId)}&mode=replacement`,
     port: 4173,
   });
 

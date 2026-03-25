@@ -9,6 +9,7 @@ export const actionLifecycleStatusSchema = z.enum([
   "completed",
   "failed",
   "cancelled",
+  "superseded",
 ]);
 export type ActionLifecycleStatus = z.infer<typeof actionLifecycleStatusSchema>;
 
@@ -190,6 +191,7 @@ export const agentEventSchema = z.discriminatedUnion("type", [
     status: z.enum(["approved", "rejected"]),
     title: z.string(),
     summary: z.string(),
+    followUpStrategy: z.enum(["revise", "replace_structure"]).optional(),
   }),
 ]);
 export type AgentEvent = z.infer<typeof agentEventSchema>;

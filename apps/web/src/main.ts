@@ -1,7 +1,8 @@
-import { bootstrapBlockEditDemo } from "@ezu/agent";
+import { bootstrapBlockEditDemo, bootstrapReplacementBlockEditDemo } from "@ezu/agent";
 
 import { createDemoBootstrap } from "./demo";
 import {
+  createWorkbenchViewModel,
   createInteractiveWebEditorState,
   createInteractiveWebEditResponse,
   getWebEditorBlockFile,
@@ -80,7 +81,7 @@ export async function mountDemoApp(target: HTMLElement = document.body): Promise
     });
 
     target.querySelectorAll<HTMLButtonElement>("[data-approval-decision]").forEach((button) => {
-      button.addEventListener("click", () => {
+      button.addEventListener("click", async () => {
         const decision = button.dataset.approvalDecision;
 
         if (!decision) {
@@ -102,6 +103,9 @@ export async function mountDemoApp(target: HTMLElement = document.body): Promise
           approvalEvent?.interaction.type === "confirm"
             ? approvalEvent.interaction.summary
             : "Review the current patch before applying it.";
+        const workbench = createWorkbenchViewModel(bootstrap);
+        const selectedPatch = workbench.selectedDiffAction;
+        const selectedBlock = getSelectedBlock(bootstrap);
 
         if (approvalEvent?.interaction.type !== "confirm") {
           return;
@@ -118,8 +122,45 @@ export async function mountDemoApp(target: HTMLElement = document.body): Promise
               decision === "approved"
                 ? `Approved: ${selectedSummary}`
                 : `Rejected: ${selectedSummary}`,
+            ...(decision === "rejected"
+              ? { followUpStrategy: "replace_structure" as const }
+              : {}),
           },
         ];
+
+        if (decision === "rejected" && selectedPatch && selectedBlock) {
+          bootstrap.initialEvents = [
+            ...bootstrap.initialEvents,
+            {
+              type: "action.updated",
+              action: {
+                ...selectedPatch,
+                status: "superseded",
+                updatedAt: new Date().toISOString(),
+              },
+            },
+          ];
+
+          const replacementEvents = await bootstrapReplacementBlockEditDemo({
+            sessionId: `${bootstrap.sessionId}-replacement-${Date.now()}`,
+            projectId: bootstrap.projectId,
+            blockId: selectedBlock.id,
+            targetPath: getWebEditorBlockFile(selectedBlock.id),
+            suggestedPrompt: `${createInteractiveWebEditorState(bootstrap.webEditor).suggestedPrompt ?? "Replace the rejected block structure."} Replace the structure instead of revising the previous patch.`,
+            rejectedPatch: selectedPatch.action.patch,
+          });
+
+          bootstrap.initialEvents = [...bootstrap.initialEvents, ...replacementEvents];
+
+          const replacementPatchAction = [...replacementEvents]
+            .reverse()
+            .find((event) => event.type === "action.created" && event.action.action.type === "file.patch");
+
+          if (replacementPatchAction && replacementPatchAction.type === "action.created") {
+            bootstrap.selectedDiffActionId = replacementPatchAction.action.id;
+          }
+        }
+
         render();
       });
     });

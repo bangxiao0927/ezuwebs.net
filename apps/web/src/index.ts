@@ -43,6 +43,7 @@ export interface ApprovalDecisionState {
   status: "approved" | "rejected";
   title: string;
   summary: string;
+  followUpStrategy?: "revise" | "replace_structure";
 }
 
 export interface WebAppEventState {
@@ -110,6 +111,7 @@ export function reduceWorkbenchEvents(
         status: event.status,
         title: event.title,
         summary: event.summary,
+        ...(event.followUpStrategy ? { followUpStrategy: event.followUpStrategy } : {}),
       };
     }
   }
@@ -543,6 +545,11 @@ function renderDiffPanel(workbench: WorkbenchViewModel): string {
           <p class="eyebrow">${escapeHtml(workbench.approvalDecision.status)}</p>
           <h3>${escapeHtml(workbench.approvalDecision.title)}</h3>
           <p>${escapeHtml(workbench.approvalDecision.summary)}</p>
+          ${
+            workbench.approvalDecision.followUpStrategy
+              ? `<p>Follow-up: ${escapeHtml(workbench.approvalDecision.followUpStrategy)}</p>`
+              : ""
+          }
         </div>
       `
       : workbench.pendingInteraction?.type === "confirm"
