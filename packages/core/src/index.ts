@@ -188,6 +188,16 @@ export function applyAgentEvent(session: SessionState, event: AgentEvent): Sessi
     };
   }
 
+  if (event.type === "interaction.resolved") {
+    const shouldClear = session.pendingInteraction?.id === event.interactionId;
+
+    return {
+      ...session,
+      ...(shouldClear ? { pendingInteraction: undefined } : {}),
+      updatedAt,
+    };
+  }
+
   if (event.type === "file.changed") {
     const nextFiles = new Set(session.runtime.files);
     nextFiles.add(event.path);

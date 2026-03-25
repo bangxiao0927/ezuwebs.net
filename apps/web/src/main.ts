@@ -98,15 +98,28 @@ export async function mountDemoApp(target: HTMLElement = document.body): Promise
           approvalEvent?.interaction.type === "confirm"
             ? approvalEvent.interaction.title
             : "Patch review";
+        const selectedSummary =
+          approvalEvent?.interaction.type === "confirm"
+            ? approvalEvent.interaction.summary
+            : "Review the current patch before applying it.";
 
-        bootstrap.approvalDecision = {
-          status: decision === "approved" ? "approved" : "rejected",
-          title: selectedTitle,
-          summary:
-            decision === "approved"
-              ? "The current patch has been approved in the demo flow."
-              : "The current patch has been rejected in the demo flow.",
-        };
+        if (approvalEvent?.interaction.type !== "confirm") {
+          return;
+        }
+
+        bootstrap.initialEvents = [
+          ...bootstrap.initialEvents,
+          {
+            type: "interaction.resolved",
+            interactionId: approvalEvent.interaction.id,
+            status: decision === "approved" ? "approved" : "rejected",
+            title: selectedTitle,
+            summary:
+              decision === "approved"
+                ? `Approved: ${selectedSummary}`
+                : `Rejected: ${selectedSummary}`,
+          },
+        ];
         render();
       });
     });
@@ -160,7 +173,6 @@ export async function mountDemoApp(target: HTMLElement = document.body): Promise
       }
 
       bootstrap.initialEvents = [...bootstrap.initialEvents, ...agentEvents];
-      delete bootstrap.approvalDecision;
       const latestPatchAction = [...agentEvents]
         .reverse()
         .find((event) => event.type === "action.created" && event.action.action.type === "file.patch");

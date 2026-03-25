@@ -22,7 +22,6 @@ export interface WebAppBootstrap {
   projectId: string;
   webEditor?: Partial<InteractiveWebEditorState>;
   selectedDiffActionId?: string;
-  approvalDecision?: ApprovalDecisionState;
 }
 
 export interface WorkbenchViewModel {
@@ -52,6 +51,7 @@ export interface WebAppEventState {
   actions: ReturnType<typeof createSessionState>["actions"];
   pendingInteraction: ReturnType<typeof createSessionState>["pendingInteraction"];
   runtime: ReturnType<typeof createSessionState>["runtime"];
+  approvalDecision?: ApprovalDecisionState;
 }
 
 export interface WebEditorBlock {
@@ -96,13 +96,23 @@ export interface InteractiveWebEditResponse {
 export function reduceWorkbenchEvents(
   input: Pick<WebAppBootstrap, "initialEvents" | "projectId" | "sessionId">,
 ): WebAppEventState {
-  const session = input.initialEvents.reduce(
-    (currentSession, event) => applyAgentEvent(currentSession, event),
-    createSessionState({
-      id: input.sessionId,
-      projectId: input.projectId,
-    }),
-  );
+  let session = createSessionState({
+    id: input.sessionId,
+    projectId: input.projectId,
+  });
+  let approvalDecision: ApprovalDecisionState | undefined;
+
+  for (const event of input.initialEvents) {
+    session = applyAgentEvent(session, event);
+
+    if (event.type === "interaction.resolved") {
+      approvalDecision = {
+        status: event.status,
+        title: event.title,
+        summary: event.summary,
+      };
+    }
+  }
 
   return {
     messages: session.messages,
@@ -110,6 +120,7 @@ export function reduceWorkbenchEvents(
     actions: session.actions,
     pendingInteraction: session.pendingInteraction,
     runtime: session.runtime,
+    ...(approvalDecision ? { approvalDecision } : {}),
   };
 }
 
@@ -134,7 +145,7 @@ export function createWorkbenchViewModel(input: WebAppBootstrap): WorkbenchViewM
     })),
     plan: state.plan,
     actions: state.actions,
-    pendingInteraction: input.approvalDecision ? undefined : state.pendingInteraction,
+    pendingInteraction: state.pendingInteraction,
     files: state.runtime.files,
     previews: state.runtime.openPorts,
     webEditor,
@@ -142,7 +153,7 @@ export function createWorkbenchViewModel(input: WebAppBootstrap): WorkbenchViewM
     ...(selectedBlockFile ? { selectedBlockFile } : {}),
     patchActions,
     ...(selectedDiffAction ? { selectedDiffAction } : {}),
-    ...(input.approvalDecision ? { approvalDecision: input.approvalDecision } : {}),
+    ...(state.approvalDecision ? { approvalDecision: state.approvalDecision } : {}),
   };
 }
 

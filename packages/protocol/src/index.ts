@@ -184,6 +184,13 @@ export const agentEventSchema = z.discriminatedUnion("type", [
     type: z.literal("interaction.required"),
     interaction: pendingInteractionSchema,
   }),
+  z.object({
+    type: z.literal("interaction.resolved"),
+    interactionId: z.string(),
+    status: z.enum(["approved", "rejected"]),
+    title: z.string(),
+    summary: z.string(),
+  }),
 ]);
 export type AgentEvent = z.infer<typeof agentEventSchema>;
 
