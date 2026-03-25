@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@ezu/agent": "workspace:*",
     "@ezu/core": "workspace:*",
     "@ezu/protocol": "workspace:*",
     "@ezu/ui": "workspace:*"

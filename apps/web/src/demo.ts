@@ -1,15 +1,17 @@
+import { bootstrapBlockEditDemo } from "@ezu/agent";
 import { type AgentEvent } from "@ezu/protocol";
 
 import {
   createInteractiveWebEditResponse,
   createWebAppShell,
+  getWebEditorBlockFile,
   renderWebAppDocument,
   type InteractiveWebEditRequest,
   type WebAppBootstrap,
 } from "./index";
 
-export function createDemoBootstrap(): WebAppBootstrap {
-  const events: AgentEvent[] = [
+export async function createDemoBootstrap(): Promise<WebAppBootstrap> {
+  const baseEvents: AgentEvent[] = [
     {
       type: "message.delta",
       messageId: "planner-demo",
@@ -91,24 +93,32 @@ export function createDemoBootstrap(): WebAppBootstrap {
       },
     ],
   };
-  const webEditor = createInteractiveWebEditResponse(editRequest).nextState;
+  const editResponse = createInteractiveWebEditResponse(editRequest);
+  const webEditor = editResponse.nextState;
+  const agentEvents = await bootstrapBlockEditDemo({
+    sessionId: "demo-session",
+    projectId: "demo-project",
+    blockId: editRequest.selection.blockId,
+    targetPath: getWebEditorBlockFile(editRequest.selection.blockId),
+    suggestedPrompt: editResponse.suggestedPrompt,
+  });
 
   return {
     config: {
       projectName: "ezuwebs.net",
       runtimeType: "browser",
     },
-    initialEvents: events,
+    initialEvents: [...baseEvents, ...agentEvents],
     sessionId: "demo-session",
     projectId: "demo-project",
     webEditor,
   };
 }
 
-export function createDemoShell() {
-  return createWebAppShell(createDemoBootstrap());
+export async function createDemoShell() {
+  return createWebAppShell(await createDemoBootstrap());
 }
 
-export function createDemoDocument(): string {
-  return renderWebAppDocument(createDemoBootstrap());
+export async function createDemoDocument(): Promise<string> {
+  return renderWebAppDocument(await createDemoBootstrap());
 }

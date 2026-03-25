@@ -15,6 +15,125 @@ export interface AgentAppOptions {
   projectId: string;
 }
 
+export interface BlockEditDemoOptions extends AgentAppOptions {
+  blockId: string;
+  targetPath: string;
+  suggestedPrompt: string;
+}
+
+function applyEvent(session: ReturnType<typeof createSessionState>, events: AgentEvent[], event: AgentEvent) {
+  events.push(event);
+  return applyAgentEvent(session, event);
+}
+
+export async function bootstrapBlockEditDemo(
+  options: BlockEditDemoOptions,
+): Promise<AgentEvent[]> {
+  const sessionStore = createSessionStore();
+  let session = createSessionState({
+    id: options.sessionId,
+    projectId: options.projectId,
+  });
+  const events: AgentEvent[] = [];
+
+  sessionStore.upsert(session);
+
+  const gateway = createModelGateway();
+  const runtime = createBrowserRuntimeStub();
+  const executor = createExecutor({ runtime, sessionStore });
+  const messageId = crypto.randomUUID();
+
+  session = applyEvent(session, events, {
+    type: "message.delta",
+    messageId,
+    text: `Planner is translating the ${options.blockId} block edit request into executable steps.`,
+  });
+
+  session = applyEvent(session, events, {
+    type: "plan.updated",
+    plan: [
+      {
+        id: crypto.randomUUID(),
+        title: `Inspect the ${options.blockId} block`,
+        description: `Use the suggested prompt to focus changes on ${options.targetPath}.`,
+        status: "completed",
+      },
+      {
+        id: crypto.randomUUID(),
+        title: "Generate a block-scoped patch action",
+        description: "Produce a safe file.write demo action from the block editor request.",
+        status: "in_progress",
+      },
+      {
+        id: crypto.randomUUID(),
+        title: "Replay the resulting changes in the workbench",
+        description: "Expose the block edit as action, file, and preview events.",
+        status: "pending",
+      },
+    ],
+  });
+
+  session = applyEvent(session, events, {
+    type: "message.delta",
+    messageId,
+    text: ` Prompt: ${options.suggestedPrompt}`,
+  });
+
+  const coderStream = gateway.streamCode({
+    prompt: options.suggestedPrompt,
+  });
+  const { session: codedSession, events: codedEvents } = await collectEventStream(session, coderStream);
+  session = codedSession;
+  events.push(...codedEvents);
+
+  const fileAction = createTimelineAction({
+    source: "coder",
+    action: {
+      type: "file.write",
+      path: options.targetPath,
+      content: [
+        `// Block edit demo for ${options.blockId}`,
+        "export const blockEditPreview = {",
+        `  blockId: '${options.blockId}',`,
+        `  prompt: ${JSON.stringify(options.suggestedPrompt)},`,
+        `  plannerModel: '${gateway.getProfile().planning.model}',`,
+        "};",
+      ].join("\n"),
+    },
+  });
+
+  session = applyEvent(session, events, {
+    type: "action.created",
+    action: fileAction,
+  });
+
+  const completedFileAction = await executor.enqueue(fileAction);
+  session = applyEvent(session, events, {
+    type: "action.updated",
+    action: completedFileAction,
+  });
+
+  session = applyEvent(session, events, {
+    type: "file.changed",
+    path: options.targetPath,
+  });
+
+  session = applyEvent(session, events, {
+    type: "preview.ready",
+    url: `http://localhost:4173?block=${encodeURIComponent(options.blockId)}`,
+    port: 4173,
+  });
+
+  session = applyEvent(session, events, {
+    type: "message.completed",
+    messageId,
+  });
+
+  sessionStore.upsert(session);
+
+  return events;
+}
+
 export async function bootstrapAgentApp(options: AgentAppOptions): Promise<AgentEvent[]> {
   const sessionStore = createSessionStore();
   let session = createSessionState({

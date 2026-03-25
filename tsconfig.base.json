@@ -15,6 +15,9 @@
     "exactOptionalPropertyTypes": true,
     "baseUrl": ".",
     "paths": {
+      "@ezu/agent": [
+        "apps/agent/src/index.ts"
+      ],
       "@ezu/core": [
         "packages/core/src/index.ts"
       ],

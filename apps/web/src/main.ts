@@ -1,7 +1,10 @@
+import { bootstrapBlockEditDemo } from "@ezu/agent";
+
 import { createDemoBootstrap } from "./demo";
 import {
   createInteractiveWebEditorState,
   createInteractiveWebEditResponse,
+  getWebEditorBlockFile,
   renderWebAppBody,
   selectInteractiveWebEditorBlock,
   upsertInteractiveWebEditorProperty,
@@ -31,9 +34,10 @@ function getSelectedBlock(bootstrap: WebAppBootstrap) {
   return blocks.find((block) => block.id === selectedBlockId) ?? blocks[0];
 }
 
-export function mountDemoApp(target: HTMLElement = document.body): void {
-  const bootstrap = createDemoBootstrap();
+export async function mountDemoApp(target: HTMLElement = document.body): Promise<void> {
+  const bootstrap = await createDemoBootstrap();
   const documentRef = target.ownerDocument;
+  let blockEditRun = 0;
 
   ensureStyles(documentRef);
 
@@ -66,11 +70,12 @@ export function mountDemoApp(target: HTMLElement = document.body): void {
       return;
     }
 
-    form.addEventListener("submit", (event) => {
+    form.addEventListener("submit", async (event) => {
       event.preventDefault();
 
       const formData = new FormData(form);
       const selectedBlock = getSelectedBlock(bootstrap);
+      const runId = ++blockEditRun;
       const request: InteractiveWebEditRequest = {
         selection: {
           blockId: selectedBlock?.id ?? "hero",
@@ -93,7 +98,23 @@ export function mountDemoApp(target: HTMLElement = document.body): void {
         nextState = upsertInteractiveWebEditorProperty(nextState, property);
       }
 
-      bootstrap.webEditor = createInteractiveWebEditResponse(request, nextState).nextState;
+      const editResponse = createInteractiveWebEditResponse(request, nextState);
+      bootstrap.webEditor = editResponse.nextState;
+      render();
+
+      const agentEvents = await bootstrapBlockEditDemo({
+        sessionId: `demo-session-block-${runId}`,
+        projectId: bootstrap.projectId,
+        blockId: request.selection.blockId,
+        targetPath: getWebEditorBlockFile(request.selection.blockId),
+        suggestedPrompt: editResponse.suggestedPrompt,
+      });
+
+      if (runId !== blockEditRun) {
+        return;
+      }
+
+      bootstrap.initialEvents = [...bootstrap.initialEvents, ...agentEvents];
       render();
     });
   };
@@ -102,5 +123,5 @@ export function mountDemoApp(target: HTMLElement = document.body): void {
 }
 
 if (typeof document !== "undefined" && document.body) {
-  mountDemoApp(document.body);
+  void mountDemoApp(document.body);
 }
