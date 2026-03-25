@@ -61,6 +61,7 @@ export interface InteractiveWebEditorState {
   blocks: WebEditorBlock[];
   properties: WebEditorProperty[];
   lastIntent?: string;
+  suggestedPrompt?: string;
 }
 
 export interface InteractiveWebEditRequest {
@@ -167,6 +168,7 @@ export function createInteractiveWebEditorState(
         },
       ],
     ...(overrides.lastIntent ? { lastIntent: overrides.lastIntent } : {}),
+    ...(overrides.suggestedPrompt ? { suggestedPrompt: overrides.suggestedPrompt } : {}),
   };
 }
 
@@ -181,13 +183,25 @@ export function createInteractiveWebEditResponse(
     selectedBlockId: request.selection.blockId,
     properties: request.properties ?? state.properties,
     lastIntent: request.intent,
+    suggestedPrompt: "",
   });
   const propertySummary = (request.properties ?? [])
     .map((property) => `${property.label}: ${property.value}`)
     .join(", ");
 
   return {
-    nextState,
+    nextState: {
+      ...nextState,
+      suggestedPrompt: [
+        `Update page block ${request.selection.blockId} at ${request.selection.path}.`,
+        `Strategy: ${request.patchStrategy}.`,
+        `Intent: ${request.intent}.`,
+        selectedBlock ? `Selector: ${selectedBlock.selector}.` : "",
+        propertySummary ? `Properties: ${propertySummary}.` : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    },
     suggestedPrompt: [
       `Update page block ${request.selection.blockId} at ${request.selection.path}.`,
       `Strategy: ${request.patchStrategy}.`,
@@ -198,6 +212,42 @@ export function createInteractiveWebEditResponse(
       .filter(Boolean)
       .join(" "),
   };
+}
+
+export function selectInteractiveWebEditorBlock(
+  state: InteractiveWebEditorState,
+  blockId: string,
+): InteractiveWebEditorState {
+  const block = state.blocks.find((item) => item.id === blockId) ?? state.blocks[0];
+
+  return createInteractiveWebEditorState({
+    ...state,
+    selectedBlockId: blockId,
+    properties: state.properties.map((property) =>
+      property.key === "headline"
+        ? {
+            ...property,
+            value: block?.label ?? property.value,
+          }
+        : property,
+    ),
+  });
+}
+
+export function upsertInteractiveWebEditorProperty(
+  state: InteractiveWebEditorState,
+  nextProperty: WebEditorProperty,
+): InteractiveWebEditorState {
+  const exists = state.properties.some((property) => property.key === nextProperty.key);
+
+  return createInteractiveWebEditorState({
+    ...state,
+    properties: exists
+      ? state.properties.map((property) =>
+          property.key === nextProperty.key ? nextProperty : property,
+        )
+      : [...state.properties, nextProperty],
+  });
 }
 
 function escapeHtml(value: string): string {
@@ -261,6 +311,8 @@ function renderPendingInteraction(interaction: PendingInteraction | undefined): 
 function renderWebEditor(state: InteractiveWebEditorState): string {
   const selectedBlock =
     state.blocks.find((block) => block.id === state.selectedBlockId) ?? state.blocks[0];
+  const intentValue = escapeHtml(state.lastIntent ?? "");
+  const selectedPath = escapeHtml(selectedBlock?.selector ?? "");
 
   return `
     <section class="card accent-card">
@@ -275,8 +327,10 @@ function renderWebEditor(state: InteractiveWebEditorState): string {
               .map(
                 (block) => `
                   <li class="${block.id === state.selectedBlockId ? "selected-item" : ""}">
-                    <strong>${escapeHtml(block.label)}</strong>
-                    <p>${escapeHtml(block.selector)}</p>
+                    <button class="editor-block-button" data-block-id="${escapeHtml(block.id)}" type="button">
+                      <strong>${escapeHtml(block.label)}</strong>
+                      <span>${escapeHtml(block.selector)}</span>
+                    </button>
                   </li>
                 `,
               )
@@ -299,195 +353,271 @@ function renderWebEditor(state: InteractiveWebEditorState): string {
           </ul>
         </div>
       </div>
+      <form class="card editor-form" data-editor-form="interactive-web-editor">
+        <p class="eyebrow">Patch Request</p>
+        <label class="field">
+          <span>Selected Path</span>
+          <input name="path" value="${selectedPath}" readonly />
+        </label>
+        <label class="field">
+          <span>Intent</span>
+          <textarea name="intent" rows="3" placeholder="Describe the change">${intentValue}</textarea>
+        </label>
+        <div class="subgrid">
+          ${state.properties
+            .map(
+              (property) => `
+                <label class="field">
+                  <span>${escapeHtml(property.label)}</span>
+                  <input name="property:${escapeHtml(property.key)}" value="${escapeHtml(property.value)}" />
+                </label>
+              `,
+            )
+            .join("")}
+        </div>
+        <label class="field">
+          <span>Patch Strategy</span>
+          <select name="patchStrategy">
+            <option value="refine" selected>refine</option>
+            <option value="append">append</option>
+            <option value="replace">replace</option>
+          </select>
+        </label>
+        <button class="submit-button" type="submit">Generate Patch Prompt</button>
+      </form>
       <div class="card">
         <p class="eyebrow">Intent</p>
         <p>${escapeHtml(state.lastIntent ?? "No edit request captured yet.")}</p>
+      </div>
+      <div class="card">
+        <p class="eyebrow">Suggested Prompt</p>
+        <p>${escapeHtml(state.suggestedPrompt ?? "Submit an edit request to generate a block-scoped prompt.")}</p>
       </div>
     </section>
   `;
 }
 
-export function renderWebAppDocument(input: WebAppBootstrap): string {
+export const webAppStyles = `
+  :root {
+    color-scheme: light;
+    --bg: #f5f1e8;
+    --panel: #fffaf0;
+    --panel-strong: #f1e8d3;
+    --ink: #1a1712;
+    --muted: #5f5545;
+    --line: #d4c6ad;
+    --accent: #b3541e;
+    --accent-soft: #f6d8b8;
+    --success: #386641;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    font-family: "Iowan Old Style", "Palatino Linotype", serif;
+    background:
+      radial-gradient(circle at top left, rgba(179, 84, 30, 0.18), transparent 24%),
+      linear-gradient(180deg, #efe6d2 0%, var(--bg) 38%, #ede6da 100%);
+    color: var(--ink);
+  }
+
+  .app-shell {
+    min-height: 100vh;
+    padding: 24px;
+  }
+
+  .topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 18px 22px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: rgba(255, 250, 240, 0.85);
+    backdrop-filter: blur(12px);
+  }
+
+  .topbar h1,
+  .panel h2,
+  .card h3 {
+    margin: 0;
+    font-family: "Avenir Next Condensed", "Franklin Gothic Medium", sans-serif;
+    letter-spacing: 0.02em;
+  }
+
+  .topbar p,
+  .card p,
+  .meta,
+  li,
+  .pill {
+    margin: 0;
+    color: var(--muted);
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(220px, 0.75fr) minmax(320px, 1.1fr) minmax(320px, 1fr);
+    gap: 18px;
+    margin-top: 18px;
+  }
+
+  .panel {
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background: rgba(255, 250, 240, 0.88);
+    padding: 18px;
+    box-shadow: 0 10px 30px rgba(61, 42, 18, 0.06);
+  }
+
+  .stack {
+    display: grid;
+    gap: 14px;
+  }
+
+  .card {
+    padding: 14px;
+    border-radius: 16px;
+    background: var(--panel);
+    border: 1px solid rgba(212, 198, 173, 0.75);
+  }
+
+  .accent-card {
+    background: linear-gradient(180deg, var(--accent-soft), rgba(255, 250, 240, 0.96));
+  }
+
+  .eyebrow {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+  }
+
+  .pill-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .pill {
+    display: inline-flex;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: rgba(241, 232, 211, 0.75);
+  }
+
+  .status {
+    color: var(--success);
+  }
+
+  ul {
+    margin: 0;
+    padding-left: 18px;
+  }
+
+  .message-list,
+  .option-list {
+    display: grid;
+    gap: 10px;
+    padding: 0;
+    list-style: none;
+  }
+
+  .message-role {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+
+  .empty-state {
+    padding: 16px;
+    border-radius: 16px;
+    border: 1px dashed var(--line);
+    color: var(--muted);
+    background: rgba(255, 250, 240, 0.65);
+  }
+
+  .selected-item {
+    padding: 10px;
+    border-radius: 12px;
+    background: rgba(179, 84, 30, 0.08);
+    border: 1px solid rgba(179, 84, 30, 0.18);
+  }
+
+  .editor-block-button {
+    width: 100%;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    text-align: left;
+    color: inherit;
+    display: grid;
+    gap: 4px;
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .editor-form {
+    display: grid;
+    gap: 12px;
+  }
+
+  .field {
+    display: grid;
+    gap: 6px;
+    color: var(--ink);
+  }
+
+  .field input,
+  .field textarea,
+  .field select {
+    width: 100%;
+    border: 1px solid rgba(95, 85, 69, 0.28);
+    border-radius: 12px;
+    padding: 10px 12px;
+    background: rgba(255, 250, 240, 0.9);
+    font: inherit;
+    color: var(--ink);
+  }
+
+  .submit-button {
+    border: 0;
+    border-radius: 999px;
+    padding: 12px 16px;
+    background: var(--accent);
+    color: #fffaf0;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .subgrid {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  @media (max-width: 1120px) {
+    .layout {
+      grid-template-columns: 1fr;
+    }
+
+    .subgrid {
+      grid-template-columns: 1fr;
+    }
+  }
+`;
+
+export function renderWebAppBody(input: WebAppBootstrap): string {
   const shell = createWebAppShell(input);
   const { workbench } = shell;
 
-  return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(shell.topBar.projectName)} Workspace</title>
-    <style>
-      :root {
-        color-scheme: light;
-        --bg: #f5f1e8;
-        --panel: #fffaf0;
-        --panel-strong: #f1e8d3;
-        --ink: #1a1712;
-        --muted: #5f5545;
-        --line: #d4c6ad;
-        --accent: #b3541e;
-        --accent-soft: #f6d8b8;
-        --success: #386641;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        margin: 0;
-        font-family: "Iowan Old Style", "Palatino Linotype", serif;
-        background:
-          radial-gradient(circle at top left, rgba(179, 84, 30, 0.18), transparent 24%),
-          linear-gradient(180deg, #efe6d2 0%, var(--bg) 38%, #ede6da 100%);
-        color: var(--ink);
-      }
-
-      .app-shell {
-        min-height: 100vh;
-        padding: 24px;
-      }
-
-      .topbar {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 16px;
-        padding: 18px 22px;
-        border: 1px solid var(--line);
-        border-radius: 18px;
-        background: rgba(255, 250, 240, 0.85);
-        backdrop-filter: blur(12px);
-      }
-
-      .topbar h1,
-      .panel h2,
-      .card h3 {
-        margin: 0;
-        font-family: "Avenir Next Condensed", "Franklin Gothic Medium", sans-serif;
-        letter-spacing: 0.02em;
-      }
-
-      .topbar p,
-      .card p,
-      .meta,
-      li,
-      .pill {
-        margin: 0;
-        color: var(--muted);
-      }
-
-      .layout {
-        display: grid;
-        grid-template-columns: minmax(220px, 0.75fr) minmax(320px, 1.1fr) minmax(320px, 1fr);
-        gap: 18px;
-        margin-top: 18px;
-      }
-
-      .panel {
-        border: 1px solid var(--line);
-        border-radius: 20px;
-        background: rgba(255, 250, 240, 0.88);
-        padding: 18px;
-        box-shadow: 0 10px 30px rgba(61, 42, 18, 0.06);
-      }
-
-      .stack {
-        display: grid;
-        gap: 14px;
-      }
-
-      .card {
-        padding: 14px;
-        border-radius: 16px;
-        background: var(--panel);
-        border: 1px solid rgba(212, 198, 173, 0.75);
-      }
-
-      .accent-card {
-        background: linear-gradient(180deg, var(--accent-soft), rgba(255, 250, 240, 0.96));
-      }
-
-      .eyebrow {
-        font-size: 12px;
-        text-transform: uppercase;
-        letter-spacing: 0.12em;
-        color: var(--accent);
-      }
-
-      .pill-row {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-      }
-
-      .pill {
-        display: inline-flex;
-        padding: 6px 10px;
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        background: rgba(241, 232, 211, 0.75);
-      }
-
-      .status {
-        color: var(--success);
-      }
-
-      ul {
-        margin: 0;
-        padding-left: 18px;
-      }
-
-      .message-list,
-      .option-list {
-        display: grid;
-        gap: 10px;
-        padding: 0;
-        list-style: none;
-      }
-
-      .message-role {
-        font-size: 12px;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--accent);
-        margin-bottom: 6px;
-      }
-
-      .empty-state {
-        padding: 16px;
-        border-radius: 16px;
-        border: 1px dashed var(--line);
-        color: var(--muted);
-        background: rgba(255, 250, 240, 0.65);
-      }
-
-      .selected-item {
-        padding: 10px;
-        border-radius: 12px;
-        background: rgba(179, 84, 30, 0.08);
-        border: 1px solid rgba(179, 84, 30, 0.18);
-      }
-
-      .subgrid {
-        display: grid;
-        gap: 14px;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
-      @media (max-width: 1120px) {
-        .layout {
-          grid-template-columns: 1fr;
-        }
-
-        .subgrid {
-          grid-template-columns: 1fr;
-        }
-      }
-    </style>
-  </head>
-  <body>
+  return `
     <main class="app-shell">
       <header class="topbar">
         <div>
@@ -649,7 +779,19 @@ export function renderWebAppDocument(input: WebAppBootstrap): string {
         </section>
       </section>
     </main>
-  </body>
+  `;
+}
+
+export function renderWebAppDocument(input: WebAppBootstrap): string {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(input.config.projectName)} Workspace</title>
+    <style>${webAppStyles}</style>
+  </head>
+  <body>${renderWebAppBody(input)}</body>
 </html>`;
 }
 
