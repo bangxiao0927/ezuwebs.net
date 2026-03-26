@@ -7,6 +7,7 @@ import {
   upsertInteractiveWebEditorProperty,
   webAppStyles,
   type InteractiveWebEditRequest,
+  type ViewMode,
   type WebAppBootstrap,
 } from "./index";
 import { createReplacementPrompt } from "./replacement.js";
@@ -18,6 +19,8 @@ type DialogKind = "share" | "publish" | "sessions" | undefined;
 type UiState = {
   activeDialog?: DialogKind;
   composerText: string;
+  activeFile?: string;
+  viewMode: ViewMode;
   toast?: string;
 };
 
@@ -412,6 +415,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
   let state = bootstrap;
   let uiState: UiState = {
     composerText: state.composerText ?? "",
+    viewMode: "layout",
   };
 
   const render = () => {
@@ -419,7 +423,12 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
       ...state,
       composerText: uiState.composerText,
     };
-    target.innerHTML = `${renderWebAppBody(state)}${renderDialog(state, uiState)}`;
+    const renderState: WebAppBootstrap = {
+      ...state,
+      activeFile: uiState.activeFile,
+      viewMode: uiState.viewMode,
+    };
+    target.innerHTML = `${renderWebAppBody(renderState)}${renderDialog(state, uiState)}`;
 
     for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-block-id]"))) {
       button.addEventListener("click", () => {
@@ -450,10 +459,52 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
     for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-diff-action-id]"))) {
       button.addEventListener("click", () => {
         const id = button.dataset.diffActionId;
+        const filePath = button.dataset.filePath;
 
         state = {
           ...state,
           ...(id ? { selectedDiffActionId: id } : {}),
+        };
+        if (filePath) {
+          uiState = {
+            ...uiState,
+            activeFile: filePath,
+          };
+        }
+        render();
+      });
+    }
+
+    for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-toolbar-action]"))) {
+      button.addEventListener("click", () => {
+        const mode = button.dataset.toolbarAction as ViewMode | undefined;
+
+        if (!mode) {
+          return;
+        }
+
+        uiState = {
+          ...uiState,
+          viewMode: mode,
+        };
+        render();
+      });
+    }
+
+    for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-file-path]"))) {
+      button.addEventListener("click", () => {
+        if (button.dataset.diffActionId) {
+          return;
+        }
+        const filePath = button.dataset.filePath;
+
+        if (!filePath) {
+          return;
+        }
+
+        uiState = {
+          ...uiState,
+          activeFile: filePath,
         };
         render();
       });

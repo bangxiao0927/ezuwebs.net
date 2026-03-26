@@ -25,7 +25,11 @@ export interface WebAppBootstrap {
   webEditor?: Partial<InteractiveWebEditorState>;
   selectedDiffActionId?: string;
   composerText?: string;
+  activeFile?: string;
+  viewMode?: ViewMode;
 }
+
+export type ViewMode = "layout" | "code" | "preview";
 
 export interface WorkbenchViewModel {
   chatMessages: Array<{ id: string; role: string; content: string }>;
@@ -617,6 +621,7 @@ function renderDiffPanel(workbench: WorkbenchViewModel): string {
                     type="button"
                     class="timeline-action-button"
                     data-diff-action-id="${escapeHtml(action.id)}"
+                    data-file-path="${escapeHtml(action.action.path)}"
                   >
                     <strong>${escapeHtml(action.action.path)}</strong>
                     <span>${escapeHtml(action.status)}</span>
@@ -708,6 +713,44 @@ function renderSessionPreview(workbench: WorkbenchViewModel): string {
         title="Live browser runtime preview"
         loading="lazy"
       ></iframe>
+    </div>
+  `;
+}
+
+function renderChatMessages(workbench: WorkbenchViewModel): string {
+  if (workbench.chatMessages.length === 0) {
+    return `<div class="empty-state dark-empty">No messages yet.</div>`;
+  }
+
+  return `
+    <div class="chat-stream">
+      ${workbench.chatMessages
+        .map((message, index) => {
+          const role = message.role ?? "assistant";
+          const roleLabel =
+            role === "assistant" ? "Bolt" : role === "user" ? "You" : "System";
+          const content = escapeHtml(message.content).replaceAll("\n", "<br />");
+          const rowClass = role === "user" ? "chat-row chat-row-user" : "chat-row";
+          const bubbleClass =
+            role === "user"
+              ? "chat-bubble chat-bubble-user"
+              : role === "system"
+                ? "chat-bubble chat-bubble-system"
+                : "chat-bubble";
+
+          return `
+            <div class="${rowClass}">
+              <div class="chat-meta">
+                <span class="chat-role">${escapeHtml(roleLabel)}</span>
+                <span class="chat-id">#${index + 1}</span>
+              </div>
+              <div class="${bubbleClass}">
+                <p>${content}</p>
+              </div>
+            </div>
+          `;
+        })
+        .join("")}
     </div>
   `;
 }
@@ -808,6 +851,19 @@ export const webAppStyles = `
     border-radius: 999px;
     background: var(--surface);
     border: 1px solid var(--line);
+    color: var(--text);
+  }
+
+  .toolbar-chip {
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
+  }
+
+  .toolbar-chip-active {
+    background: var(--accent-soft);
+    border-color: rgba(79, 140, 255, 0.5);
+    color: #dbe7ff;
   }
 
   .brand-mark {
@@ -849,6 +905,27 @@ export const webAppStyles = `
     min-height: 0;
   }
 
+  .workspace-shell[data-view-mode="preview"] .file-rail,
+  .workspace-shell[data-view-mode="preview"] .editor-pane,
+  .workspace-shell[data-view-mode="preview"] .diff-pane,
+  .workspace-shell[data-view-mode="preview"] .terminal {
+    display: none;
+  }
+
+  .workspace-shell[data-view-mode="preview"] .editor-split {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-shell[data-view-mode="code"] .preview-pane,
+  .workspace-shell[data-view-mode="code"] .diff-pane,
+  .workspace-shell[data-view-mode="code"] .terminal {
+    display: none;
+  }
+
+  .workspace-shell[data-view-mode="code"] .editor-split {
+    grid-template-columns: 1fr;
+  }
+
   .eyebrow {
     font-size: 12px;
     text-transform: uppercase;
@@ -881,6 +958,57 @@ export const webAppStyles = `
     padding-right: 4px;
   }
 
+  .rail-accordion {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--panel);
+    margin-bottom: 14px;
+    overflow: hidden;
+  }
+
+  .rail-accordion summary {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .rail-accordion summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .rail-accordion summary strong {
+    display: block;
+    color: var(--text);
+    font-size: 0.95rem;
+  }
+
+  .rail-accordion[open] summary {
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .accordion-body {
+    display: grid;
+    gap: 12px;
+    padding: 12px 14px 14px;
+  }
+
+  .rail-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .rail-summary {
+    margin: 0;
+    color: var(--dim);
+    font-size: 0.85rem;
+  }
+
   .rail-scroll h1,
   .panel-title,
   .card h3,
@@ -903,6 +1031,67 @@ export const webAppStyles = `
   .card p {
     line-height: 1.7;
     font-size: 0.93rem;
+  }
+
+  .chat-stream {
+    display: grid;
+    gap: 12px;
+  }
+
+  .chat-row {
+    display: grid;
+    gap: 6px;
+  }
+
+  .chat-row-user {
+    justify-items: end;
+    text-align: right;
+  }
+
+  .chat-meta {
+    display: flex;
+    gap: 8px;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .chat-row-user .chat-meta {
+    justify-content: flex-end;
+  }
+
+  .chat-role {
+    padding: 2px 6px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .chat-id {
+    color: var(--muted);
+  }
+
+  .chat-bubble {
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--text);
+  }
+
+  .chat-bubble p {
+    margin: 0;
+  }
+
+  .chat-bubble-user {
+    background: rgba(79, 140, 255, 0.18);
+    border-color: rgba(79, 140, 255, 0.32);
+  }
+
+  .chat-bubble-system {
+    background: rgba(34, 197, 94, 0.12);
+    border-color: rgba(34, 197, 94, 0.3);
   }
 
   .rail-scroll ul,
@@ -942,6 +1131,11 @@ export const webAppStyles = `
     background: var(--panel);
   }
 
+  .dark-empty {
+    background: #0f1319;
+    color: var(--dim);
+  }
+
   .task-card,
   .prompt-box,
   .card {
@@ -969,6 +1163,53 @@ export const webAppStyles = `
   .prompt-box {
     margin-top: 16px;
     background: #12161d;
+  }
+
+  .rail-grid {
+    display: grid;
+    gap: 12px;
+  }
+
+  .rail-meta-grid {
+    display: grid;
+    gap: 10px;
+  }
+
+  .rail-meta-grid strong {
+    display: block;
+    color: var(--text);
+    margin-top: 4px;
+  }
+
+  .plan-list {
+    list-style: none;
+    padding: 0;
+    margin: 10px 0 0;
+    display: grid;
+    gap: 10px;
+  }
+
+  .plan-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.03);
+    font-size: 0.85rem;
+  }
+
+  .plan-title {
+    color: var(--text);
+  }
+
+  .plan-status {
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.7rem;
   }
 
   .prompt-input {
@@ -1421,12 +1662,17 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
     ]),
   ];
   const activeFile =
-    workbench.selectedDiffAction?.action.path ?? workbench.selectedBlockFile ?? uniqueFiles[0] ?? "src/App.tsx";
+    input.activeFile ??
+    workbench.selectedDiffAction?.action.path ??
+    workbench.selectedBlockFile ??
+    uniqueFiles[0] ??
+    "src/App.tsx";
   const currentMessage = workbench.chatMessages[workbench.chatMessages.length - 1];
+  const viewMode: ViewMode = input.viewMode ?? "layout";
 
   return `
     <main class="app-shell">
-      <div class="workspace-shell">
+      <div class="workspace-shell" data-view-mode="${escapeHtml(viewMode)}">
         <header class="workspace-topbar">
           <div class="topbar-left">
             <div class="brand-mark">b</div>
@@ -1438,9 +1684,24 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
           </div>
           <div class="topbar-right">
             <div class="topbar-actions">
-              <span class="toolbar-chip">👁</span>
-              <span class="toolbar-chip">&lt;/&gt;</span>
-              <span class="toolbar-chip">▤</span>
+              <button
+                class="toolbar-chip ${viewMode === "preview" ? "toolbar-chip-active" : ""}"
+                data-toolbar-action="preview"
+                type="button"
+                aria-label="Preview view"
+              >👁</button>
+              <button
+                class="toolbar-chip ${viewMode === "code" ? "toolbar-chip-active" : ""}"
+                data-toolbar-action="code"
+                type="button"
+                aria-label="Code view"
+              >&lt;/&gt;</button>
+              <button
+                class="toolbar-chip ${viewMode === "layout" ? "toolbar-chip-active" : ""}"
+                data-toolbar-action="layout"
+                type="button"
+                aria-label="Layout view"
+              >▤</button>
             </div>
             <button class="topbar-button" data-open-dialog="sessions" type="button">Sessions</button>
             <button class="topbar-button" data-open-dialog="share" type="button">Share</button>
@@ -1452,48 +1713,117 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
         <section class="workspace-content">
           <aside class="workspace-rail">
             <div class="rail-scroll">
-              <h1>${escapeHtml(currentMessage?.content ?? "This session is ready to show messages, code, preview, and runtime state.")}</h1>
-              <p><strong>主要功能：</strong></p>
-              <ul>
-                <li>顶部导航工作台，支持每个会话独立进入</li>
-                <li>文件树、代码区、终端和预览同时可见</li>
-                <li>补丁、审批、区块编辑都保留在会话上下文里</li>
-                <li>浏览器 runtime 预览以内嵌 iframe 方式直接显示</li>
-              </ul>
-              <p><strong>当前计划：</strong></p>
-              <ul>
-                ${workbench.plan
-                  .map((step) => `<li><strong>${escapeHtml(step.title)}</strong>，${escapeHtml(step.description ?? "No description")}</li>`)
-                  .join("")}
-              </ul>
-
-              <div class="task-card">
-                <span class="label">${escapeHtml(shell.topBar.projectName)}</span>
-                <span class="meta">${escapeHtml(input.sessionId)}</span>
-              </div>
-
-              <div class="prompt-box">
-                <div class="meta">How can Bolt help you today? (or /command)</div>
-                <div class="prompt-input">
-                  <span>+</span>
-                  <input
-                    data-command-input
-                    value="${escapeHtml(input.composerText ?? "")}"
-                    placeholder="Ask Bolt to refine layout, preview, or patch flow"
-                  />
-                  <span>${escapeHtml(shell.topBar.runtimeType)}</span>
-                  <button class="send-button" data-send-message type="button" aria-label="Send">↑</button>
+              <details class="rail-accordion" open>
+                <summary>
+                  <div>
+                    <p class="eyebrow">Conversation</p>
+                    <h1>${escapeHtml(currentMessage?.content ?? "Start with a request and keep context together in one workspace.")}</h1>
+                  </div>
+                  <div class="rail-badges">
+                    <span class="pill">${escapeHtml(String(workbench.chatMessages.length))} messages</span>
+                    <span class="pill">${escapeHtml(String(workbench.plan.length))} steps</span>
+                  </div>
+                </summary>
+                <div class="accordion-body">
+                  <p class="rail-summary">Runtime: ${escapeHtml(shell.topBar.runtimeType)} · Active block ${escapeHtml(workbench.selectedBlock?.label ?? "None")}</p>
+                  ${renderChatMessages(workbench)}
                 </div>
-                <div class="prompt-footer">
-                  <span>${escapeHtml(String(workbench.actions.length))} actions</span>
-                  <span>${escapeHtml(String(workbench.previews.length))} previews</span>
-                </div>
-              </div>
+              </details>
 
-              <div class="card section-card">
-                <p class="eyebrow">Interactive Web Editor</p>
-                ${renderWebEditor(workbench.webEditor)}
-              </div>
+              <details class="rail-accordion" open>
+                <summary>
+                  <p class="eyebrow">Composer</p>
+                  <strong>Send a new request</strong>
+                </summary>
+                <div class="accordion-body">
+                  <div class="prompt-box">
+                    <div class="meta">How can Bolt help you today? (or /command)</div>
+                    <div class="prompt-input">
+                      <span>+</span>
+                      <input
+                        data-command-input
+                        value="${escapeHtml(input.composerText ?? "")}"
+                        placeholder="Ask Bolt to refine layout, preview, or patch flow"
+                      />
+                      <span>${escapeHtml(shell.topBar.runtimeType)}</span>
+                      <button class="send-button" data-send-message type="button" aria-label="Send">↑</button>
+                    </div>
+                    <div class="prompt-footer">
+                      <span>${escapeHtml(String(workbench.actions.length))} actions</span>
+                      <span>${escapeHtml(String(workbench.previews.length))} previews</span>
+                    </div>
+                  </div>
+                </div>
+              </details>
+
+              <details class="rail-accordion">
+                <summary>
+                  <p class="eyebrow">Session & Plan</p>
+                  <strong>Context and execution</strong>
+                </summary>
+                <div class="accordion-body">
+                  <div class="rail-grid">
+                    <div class="card section-card">
+                      <p class="eyebrow">Session</p>
+                      <div class="rail-meta-grid">
+                        <div>
+                          <span class="meta">Project</span>
+                          <strong>${escapeHtml(shell.topBar.projectName)}</strong>
+                        </div>
+                        <div>
+                          <span class="meta">Session</span>
+                          <strong>${escapeHtml(input.sessionId)}</strong>
+                        </div>
+                        <div>
+                          <span class="meta">Patch Actions</span>
+                          <strong>${escapeHtml(String(workbench.patchActions.length))}</strong>
+                        </div>
+                        <div>
+                          <span class="meta">Preview Ports</span>
+                          <strong>${escapeHtml(String(workbench.previews.length))}</strong>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="card section-card">
+                      <p class="eyebrow">Plan</p>
+                      <ul class="plan-list">
+                        ${workbench.plan.length > 0
+                          ? workbench.plan
+                              .map(
+                                (step) => `
+                                  <li>
+                                    <span class="plan-title">${escapeHtml(step.title)}</span>
+                                    <span class="plan-status">${escapeHtml(renderPlanStatus(step.status))}</span>
+                                  </li>
+                                `,
+                              )
+                              .join("")
+                          : `<li class="empty-state dark-empty">No plan yet</li>`}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </details>
+
+              <details class="rail-accordion">
+                <summary>
+                  <p class="eyebrow">Pending</p>
+                  <strong>Approvals & input</strong>
+                </summary>
+                <div class="accordion-body">
+                  ${renderPendingInteraction(workbench.pendingInteraction)}
+                </div>
+              </details>
+
+              <details class="rail-accordion">
+                <summary>
+                  <p class="eyebrow">Editor</p>
+                  <strong>Interactive Web Editor</strong>
+                </summary>
+                <div class="accordion-body">
+                  ${renderWebEditor(workbench.webEditor)}
+                </div>
+              </details>
             </div>
           </aside>
 
@@ -1506,10 +1836,14 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
               ${uniqueFiles
                 .map(
                   (file) => `
-                    <div class="file-item ${file === activeFile ? "file-item-active" : ""}">
+                    <button
+                      class="file-item ${file === activeFile ? "file-item-active" : ""}"
+                      data-file-path="${escapeHtml(file)}"
+                      type="button"
+                    >
                       <span>${escapeHtml(file === "src" ? "⌄" : "▸")}</span>
                       <span>${escapeHtml(file)}</span>
-                    </div>
+                    </button>
                   `,
                 )
                 .join("")}
