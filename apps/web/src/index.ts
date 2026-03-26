@@ -825,6 +825,7 @@ export const webAppStyles = `
   html,
   body {
     margin: 0;
+    height: 100%;
     min-height: 100%;
     background:
       radial-gradient(circle at top left, rgba(124, 196, 255, 0.14), transparent 24%),
@@ -832,6 +833,7 @@ export const webAppStyles = `
       linear-gradient(180deg, #060816 0%, #09111d 100%);
     color: var(--text);
     font-family: Inter, "Segoe UI", sans-serif;
+    overflow: hidden;
   }
 
   a {
@@ -847,11 +849,15 @@ export const webAppStyles = `
   }
 
   .app-shell {
+    height: 100vh;
+    height: 100dvh;
     min-height: 100vh;
     padding: 0;
   }
 
   .workspace-shell {
+    height: calc(100vh - 28px);
+    height: calc(100dvh - 28px);
     min-height: calc(100vh - 28px);
     display: grid;
     grid-template-rows: auto 1fr;
@@ -1163,6 +1169,7 @@ export const webAppStyles = `
     min-height: 0;
     padding: 0;
     display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .workspace-shell[data-view-mode="preview"] .preview-body {
@@ -1960,10 +1967,14 @@ export const webAppStyles = `
 
   @media (max-width: 720px) {
     .app-shell {
+      height: 100vh;
+      height: 100dvh;
       padding: 0;
     }
 
     .workspace-shell {
+      height: 100vh;
+      height: 100dvh;
       min-height: 100vh;
       border-radius: 0;
     }
