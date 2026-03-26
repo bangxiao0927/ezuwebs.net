@@ -415,7 +415,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
   let state = bootstrap;
   let uiState: UiState = {
     composerText: state.composerText ?? "",
-    viewMode: "layout",
+    viewMode: "preview",
   };
 
   const render = () => {

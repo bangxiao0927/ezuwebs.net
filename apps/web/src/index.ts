@@ -29,7 +29,7 @@ export interface WebAppBootstrap {
   viewMode?: ViewMode;
 }
 
-export type ViewMode = "layout" | "code" | "preview";
+export type ViewMode = "preview" | "code" | "diff";
 
 export interface WorkbenchViewModel {
   chatMessages: Array<{ id: string; role: string; content: string }>;
@@ -717,6 +717,23 @@ function renderSessionPreview(workbench: WorkbenchViewModel): string {
   `;
 }
 
+function renderModelOutput(workbench: WorkbenchViewModel): string {
+  const lastAssistant = [...workbench.chatMessages]
+    .reverse()
+    .find((message) => message.role === "assistant");
+
+  if (!lastAssistant) {
+    return `<div class="empty-state dark-empty">No model output yet.</div>`;
+  }
+
+  return `
+    <div class="output-card">
+      <p class="eyebrow">Latest Output</p>
+      <p>${escapeHtml(lastAssistant.content)}</p>
+    </div>
+  `;
+}
+
 function renderChatMessages(workbench: WorkbenchViewModel): string {
   if (workbench.chatMessages.length === 0) {
     return `<div class="empty-state dark-empty">No messages yet.</div>`;
@@ -728,7 +745,7 @@ function renderChatMessages(workbench: WorkbenchViewModel): string {
         .map((message, index) => {
           const role = message.role ?? "assistant";
           const roleLabel =
-            role === "assistant" ? "Bolt" : role === "user" ? "You" : "System";
+            role === "assistant" ? "Ezu" : role === "user" ? "You" : "System";
           const content = escapeHtml(message.content).replaceAll("\n", "<br />");
           const rowClass = role === "user" ? "chat-row chat-row-user" : "chat-row";
           const bubbleClass =
@@ -740,10 +757,6 @@ function renderChatMessages(workbench: WorkbenchViewModel): string {
 
           return `
             <div class="${rowClass}">
-              <div class="chat-meta">
-                <span class="chat-role">${escapeHtml(roleLabel)}</span>
-                <span class="chat-id">#${index + 1}</span>
-              </div>
               <div class="${bubbleClass}">
                 <p>${content}</p>
               </div>
@@ -807,18 +820,18 @@ export const webAppStyles = `
 
   .app-shell {
     min-height: 100vh;
-    padding: 14px;
+    padding: 0;
   }
 
   .workspace-shell {
     min-height: calc(100vh - 28px);
     display: grid;
     grid-template-rows: auto 1fr;
-    border: 1px solid var(--line);
-    border-radius: 18px;
+    border: 0;
+    border-radius: 0;
     overflow: hidden;
     background: rgba(10, 12, 17, 0.9);
-    box-shadow: var(--shadow);
+    box-shadow: none;
   }
 
   .workspace-topbar {
@@ -901,29 +914,129 @@ export const webAppStyles = `
 
   .workspace-content {
     display: grid;
-    grid-template-columns: 320px 250px minmax(0, 1fr);
+    grid-template-columns: minmax(280px, 0.34fr) minmax(0, 1fr);
     min-height: 0;
   }
 
-  .workspace-shell[data-view-mode="preview"] .file-rail,
-  .workspace-shell[data-view-mode="preview"] .editor-pane,
-  .workspace-shell[data-view-mode="preview"] .diff-pane,
-  .workspace-shell[data-view-mode="preview"] .terminal {
+  .chat-shell {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    border-right: 1px solid var(--line);
+    background: rgba(16, 19, 25, 0.94);
+    min-height: 0;
+  }
+
+  .chat-header {
+    padding: 16px 16px 12px;
+    display: grid;
+    gap: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .chat-title {
+    display: grid;
+    gap: 6px;
+  }
+
+  .chat-title h2 {
+    margin: 0;
+    font-size: 1.05rem;
+    letter-spacing: -0.02em;
+  }
+
+  .chat-tools {
+    display: grid;
+    gap: 8px;
+  }
+
+  .model-select {
+    width: 100%;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    padding: 8px 10px;
+  }
+
+  .chat-scroll {
+    padding: 16px;
+    overflow: auto;
+    display: grid;
+    gap: 14px;
+  }
+
+  .chat-footer {
+    padding: 12px 16px 16px;
+    border-top: 1px solid var(--line);
+  }
+
+  .output-card {
+    display: inline-block;
+    width: fit-content;
+    max-width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .output-card p {
+    margin: 0;
+  }
+
+  .preview-shell {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    min-height: 0;
+    background: var(--panel-3);
+  }
+
+  .preview-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(18, 21, 28, 0.96);
+  }
+
+  .preview-tabs {
+    display: flex;
+    gap: 8px;
+  }
+
+  .preview-tab {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--muted);
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .preview-tab-active {
+    background: var(--accent-soft);
+    color: var(--text);
+    border-color: rgba(79, 140, 255, 0.5);
+  }
+
+  .preview-body {
+    padding: 16px;
+    overflow: auto;
+  }
+
+  .workspace-shell[data-view-mode="preview"] .preview-panel,
+  .workspace-shell[data-view-mode="code"] .code-panel,
+  .workspace-shell[data-view-mode="diff"] .diff-panel {
+    display: block;
+  }
+
+  .preview-panel,
+  .code-panel,
+  .diff-panel {
     display: none;
-  }
-
-  .workspace-shell[data-view-mode="preview"] .editor-split {
-    grid-template-columns: 1fr;
-  }
-
-  .workspace-shell[data-view-mode="code"] .preview-pane,
-  .workspace-shell[data-view-mode="code"] .diff-pane,
-  .workspace-shell[data-view-mode="code"] .terminal {
-    display: none;
-  }
-
-  .workspace-shell[data-view-mode="code"] .editor-split {
-    grid-template-columns: 1fr;
   }
 
   .eyebrow {
@@ -1048,36 +1161,17 @@ export const webAppStyles = `
     text-align: right;
   }
 
-  .chat-meta {
-    display: flex;
-    gap: 8px;
-    font-size: 0.72rem;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--dim);
-  }
-
-  .chat-row-user .chat-meta {
-    justify-content: flex-end;
-  }
-
-  .chat-role {
-    padding: 2px 6px;
-    border-radius: 999px;
-    border: 1px solid var(--line);
-    background: rgba(255, 255, 255, 0.04);
-  }
-
-  .chat-id {
-    color: var(--muted);
-  }
-
   .chat-bubble {
-    padding: 10px 12px;
+    display: inline-block;
+    width: fit-content;
+    max-width: 100%;
+    padding: 8px 10px;
     border-radius: 12px;
     border: 1px solid var(--line);
     background: var(--panel-2);
     color: var(--text);
+    font-size: 0.9rem;
+    line-height: 1.6;
   }
 
   .chat-bubble p {
@@ -1625,6 +1719,19 @@ export const webAppStyles = `
   }
 
   @media (max-width: 1120px) {
+    .workspace-content {
+      grid-template-columns: 1fr;
+    }
+
+    .chat-shell {
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .preview-shell {
+      min-height: 60vh;
+    }
+
     .workspace-content,
     .editor-split {
       grid-template-columns: 1fr;
@@ -1648,6 +1755,16 @@ export const webAppStyles = `
     .workspace-topbar {
       flex-wrap: wrap;
     }
+
+    .preview-topbar {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .preview-tabs {
+      width: 100%;
+      flex-wrap: wrap;
+    }
   }
 `;
 
@@ -1667,205 +1784,93 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
     workbench.selectedBlockFile ??
     uniqueFiles[0] ??
     "src/App.tsx";
-  const currentMessage = workbench.chatMessages[workbench.chatMessages.length - 1];
-  const viewMode: ViewMode = input.viewMode ?? "layout";
+  const viewMode: ViewMode = input.viewMode ?? "preview";
 
   return `
     <main class="app-shell">
       <div class="workspace-shell" data-view-mode="${escapeHtml(viewMode)}">
         <header class="workspace-topbar">
           <div class="topbar-left">
-            <div class="brand-mark">b</div>
-            <div class="avatar">B</div>
+            <div class="brand-mark">EZ</div>
+            <div class="avatar">E</div>
             <div class="topbar-crumbs">
               <span class="topbar-title">${escapeHtml(shell.topBar.projectName)}</span>
               <span class="crumb-muted">🔒</span>
             </div>
           </div>
           <div class="topbar-right">
-            <div class="topbar-actions">
-              <button
-                class="toolbar-chip ${viewMode === "preview" ? "toolbar-chip-active" : ""}"
-                data-toolbar-action="preview"
-                type="button"
-                aria-label="Preview view"
-              >👁</button>
-              <button
-                class="toolbar-chip ${viewMode === "code" ? "toolbar-chip-active" : ""}"
-                data-toolbar-action="code"
-                type="button"
-                aria-label="Code view"
-              >&lt;/&gt;</button>
-              <button
-                class="toolbar-chip ${viewMode === "layout" ? "toolbar-chip-active" : ""}"
-                data-toolbar-action="layout"
-                type="button"
-                aria-label="Layout view"
-              >▤</button>
-            </div>
             <button class="topbar-button" data-open-dialog="sessions" type="button">Sessions</button>
             <button class="topbar-button" data-open-dialog="share" type="button">Share</button>
             <button class="topbar-button topbar-button-primary" data-open-dialog="publish" type="button">Publish</button>
-            <div class="avatar">B</div>
+            <div class="avatar">E</div>
           </div>
         </header>
 
         <section class="workspace-content">
-          <aside class="workspace-rail">
-            <div class="rail-scroll">
-              <details class="rail-accordion" open>
-                <summary>
-                  <div>
-                    <p class="eyebrow">Conversation</p>
-                    <h1>${escapeHtml(currentMessage?.content ?? "Start with a request and keep context together in one workspace.")}</h1>
-                  </div>
-                  <div class="rail-badges">
-                    <span class="pill">${escapeHtml(String(workbench.chatMessages.length))} messages</span>
-                    <span class="pill">${escapeHtml(String(workbench.plan.length))} steps</span>
-                  </div>
-                </summary>
-                <div class="accordion-body">
-                  <p class="rail-summary">Runtime: ${escapeHtml(shell.topBar.runtimeType)} · Active block ${escapeHtml(workbench.selectedBlock?.label ?? "None")}</p>
-                  ${renderChatMessages(workbench)}
-                </div>
-              </details>
-
-              <details class="rail-accordion" open>
-                <summary>
-                  <p class="eyebrow">Composer</p>
-                  <strong>Send a new request</strong>
-                </summary>
-                <div class="accordion-body">
-                  <div class="prompt-box">
-                    <div class="meta">How can Bolt help you today? (or /command)</div>
-                    <div class="prompt-input">
-                      <span>+</span>
-                      <input
-                        data-command-input
-                        value="${escapeHtml(input.composerText ?? "")}"
-                        placeholder="Ask Bolt to refine layout, preview, or patch flow"
-                      />
-                      <span>${escapeHtml(shell.topBar.runtimeType)}</span>
-                      <button class="send-button" data-send-message type="button" aria-label="Send">↑</button>
-                    </div>
-                    <div class="prompt-footer">
-                      <span>${escapeHtml(String(workbench.actions.length))} actions</span>
-                      <span>${escapeHtml(String(workbench.previews.length))} previews</span>
-                    </div>
-                  </div>
-                </div>
-              </details>
-
-              <details class="rail-accordion">
-                <summary>
-                  <p class="eyebrow">Session & Plan</p>
-                  <strong>Context and execution</strong>
-                </summary>
-                <div class="accordion-body">
-                  <div class="rail-grid">
-                    <div class="card section-card">
-                      <p class="eyebrow">Session</p>
-                      <div class="rail-meta-grid">
-                        <div>
-                          <span class="meta">Project</span>
-                          <strong>${escapeHtml(shell.topBar.projectName)}</strong>
-                        </div>
-                        <div>
-                          <span class="meta">Session</span>
-                          <strong>${escapeHtml(input.sessionId)}</strong>
-                        </div>
-                        <div>
-                          <span class="meta">Patch Actions</span>
-                          <strong>${escapeHtml(String(workbench.patchActions.length))}</strong>
-                        </div>
-                        <div>
-                          <span class="meta">Preview Ports</span>
-                          <strong>${escapeHtml(String(workbench.previews.length))}</strong>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="card section-card">
-                      <p class="eyebrow">Plan</p>
-                      <ul class="plan-list">
-                        ${workbench.plan.length > 0
-                          ? workbench.plan
-                              .map(
-                                (step) => `
-                                  <li>
-                                    <span class="plan-title">${escapeHtml(step.title)}</span>
-                                    <span class="plan-status">${escapeHtml(renderPlanStatus(step.status))}</span>
-                                  </li>
-                                `,
-                              )
-                              .join("")
-                          : `<li class="empty-state dark-empty">No plan yet</li>`}
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-              </details>
-
-              <details class="rail-accordion">
-                <summary>
-                  <p class="eyebrow">Pending</p>
-                  <strong>Approvals & input</strong>
-                </summary>
-                <div class="accordion-body">
-                  ${renderPendingInteraction(workbench.pendingInteraction)}
-                </div>
-              </details>
-
-              <details class="rail-accordion">
-                <summary>
-                  <p class="eyebrow">Editor</p>
-                  <strong>Interactive Web Editor</strong>
-                </summary>
-                <div class="accordion-body">
-                  ${renderWebEditor(workbench.webEditor)}
-                </div>
-              </details>
-            </div>
-          </aside>
-
-          <aside class="file-rail">
-            <div class="file-topbar">
-              <strong>Files</strong>
-              <span>Search</span>
-            </div>
-            <div class="file-tree">
-              ${uniqueFiles
-                .map(
-                  (file) => `
-                    <button
-                      class="file-item ${file === activeFile ? "file-item-active" : ""}"
-                      data-file-path="${escapeHtml(file)}"
-                      type="button"
-                    >
-                      <span>${escapeHtml(file === "src" ? "⌄" : "▸")}</span>
-                      <span>${escapeHtml(file)}</span>
-                    </button>
-                  `,
-                )
-                .join("")}
-            </div>
-          </aside>
-
-          <section class="editor-shell">
-            <div class="editor-topbar">
-              <span>${escapeHtml(activeFile.replace(/\//g, " > "))}</span>
-              <strong>${escapeHtml(workbench.selectedBlock?.label ?? "Workspace Block")}</strong>
-            </div>
-
-            <div class="editor-split">
-              <div class="editor-pane">
-                ${renderEditorCode(workbench)}
+          <aside class="chat-shell">
+            <div class="chat-header">
+              <div class="chat-title">
+                <p class="eyebrow">Conversation</p>
+                <h2>${escapeHtml(shell.topBar.projectName)}</h2>
+                <p class="rail-summary">Runtime: ${escapeHtml(shell.topBar.runtimeType)}</p>
               </div>
-
-              <div class="preview-pane">
-                <div class="preview-pane-header">
-                  <p class="eyebrow">Preview</p>
-                  <h2>Embedded browser runtime</h2>
+              <div class="chat-tools">
+                <label class="meta" for="model-select">Model</label>
+                <select id="model-select" class="model-select">
+                  <option value="gpt-4.1">gpt-4.1</option>
+                  <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                  <option value="claude-3.5">claude-3.5</option>
+                  <option value="deepseek-r1">deepseek-r1</option>
+                </select>
+              </div>
+            </div>
+            <div class="chat-scroll">
+              ${renderChatMessages(workbench)}
+              ${renderModelOutput(workbench)}
+            </div>
+            <div class="chat-footer">
+              <div class="prompt-box">
+                <div class="meta">How can we help you today? (or /command)</div>
+                <div class="prompt-input">
+                  <span>+</span>
+                  <input
+                    data-command-input
+                    value="${escapeHtml(input.composerText ?? "")}"
+                    placeholder="Ask to refine layout, preview, or patch flow"
+                  />
+                  <span>${escapeHtml(shell.topBar.runtimeType)}</span>
+                  <button class="send-button" data-send-message type="button" aria-label="Send">↑</button>
                 </div>
+              </div>
+            </div>
+          </aside>
+
+          <section class="preview-shell">
+            <div class="preview-topbar">
+              <div>
+                <p class="eyebrow">Workspace</p>
+                <strong>${escapeHtml(activeFile.replace(/\//g, " > "))}</strong>
+              </div>
+              <div class="preview-tabs">
+                <button
+                  class="preview-tab ${viewMode === "preview" ? "preview-tab-active" : ""}"
+                  data-toolbar-action="preview"
+                  type="button"
+                >Preview</button>
+                <button
+                  class="preview-tab ${viewMode === "code" ? "preview-tab-active" : ""}"
+                  data-toolbar-action="code"
+                  type="button"
+                >Code</button>
+                <button
+                  class="preview-tab ${viewMode === "diff" ? "preview-tab-active" : ""}"
+                  data-toolbar-action="diff"
+                  type="button"
+                >Diff</button>
+              </div>
+            </div>
+            <div class="preview-body">
+              <div class="preview-panel">
                 ${renderSessionPreview(workbench)}
                 <div class="preview-controls">
                   <div class="preview-stack">
@@ -1886,28 +1891,12 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
                   </div>
                 </div>
               </div>
-            </div>
-
-            <div class="diff-pane">
-              <div class="diff-pane-header">
-                <p class="eyebrow">Review</p>
-                <h2>Patch review and runtime output</h2>
+              <div class="code-panel">
+                ${renderEditorCode(workbench)}
               </div>
-              <div class="diff-pane-body">
-                <div class="stack">
-                  ${renderDiffPanel(workbench)}
-                </div>
+              <div class="diff-panel">
+                ${renderDiffPanel(workbench)}
               </div>
-            </div>
-
-            <div class="terminal">
-              <div class="terminal-tabs">
-                <span class="terminal-tab active">Bolt</span>
-                <span class="terminal-tab">Publish Output</span>
-                <span class="terminal-tab">Terminal</span>
-                <span>+</span>
-              </div>
-              <div class="terminal-body">${renderSessionTerminal(workbench)}</div>
             </div>
           </section>
         </section>

@@ -29,7 +29,7 @@ const demoSessions: DemoSessionDefinition[] = [
     taskTitle: "Create High School Club Promotion Page",
     taskTimestamp: "Version 2 at Mar 22 2:18 PM",
     intent:
-      "Refine the session workspace to feel closer to Bolt. Keep the project explanation on the left, show a code editor in the center, and preserve an embedded preview with a browser-container feel.",
+      "Refine the session workspace to feel closer to the project design system. Keep the project explanation on the left, show a code editor in the center, and preserve an embedded preview with a browser-container feel.",
     properties: [
       {
         key: "headline",
@@ -93,12 +93,7 @@ export async function createDemoBootstrap(sessionId = "club-promo"): Promise<Web
     {
       type: "message.delta",
       messageId: `assistant-${definition.id}`,
-      text: `完美！我已经为你创建了一个精美的会话工作台，用来展示 ${definition.projectName} 的设计、代码和预览。`,
-    },
-    {
-      type: "message.delta",
-      messageId: `assistant-${definition.id}`,
-      text: ` 当前目标：${definition.description}`,
+      text: `已为 ${definition.projectName} 初始化会话工作台。`,
     },
     {
       type: "plan.updated",
@@ -179,13 +174,28 @@ export async function createDemoBootstrap(sessionId = "club-promo"): Promise<Web
     targetPath: getWebEditorBlockFile(editRequest.selection.blockId),
     suggestedPrompt: editResponse.suggestedPrompt,
   });
+  const dropMessageIds = new Set(
+    agentEvents
+      .filter(
+        (event) =>
+          event.type === "message.delta" &&
+          /Bolt|Planner is translating|Update page block/i.test(event.text),
+      )
+      .map((event) => event.messageId),
+  );
+  const cleanedAgentEvents = agentEvents.filter((event) => {
+    if (event.type === "message.delta" || event.type === "message.completed") {
+      return !dropMessageIds.has(event.messageId);
+    }
+    return true;
+  });
 
   return {
     config: {
       projectName: definition.projectName,
       runtimeType: "browser",
     },
-    initialEvents: [...baseEvents, ...agentEvents],
+    initialEvents: [...baseEvents, ...cleanedAgentEvents],
     sessionId: `${definition.id}-session`,
     projectId: `${definition.id}-project`,
     webEditor,
