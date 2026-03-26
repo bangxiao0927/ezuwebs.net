@@ -25,6 +25,11 @@ type UiState = {
   toast?: string;
 };
 
+type PreviewHistoryState = {
+  entries: string[];
+  index: number;
+};
+
 const THREADS_VERTEX_SHADER = `
 attribute vec2 position;
 void main() {
@@ -859,8 +864,60 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
     composerText: state.composerText ?? "",
     viewMode: "preview",
   };
+  let previewHistory: PreviewHistoryState = {
+    entries: [],
+    index: -1,
+  };
+
+  const getDefaultPreviewUrl = (): string | undefined => {
+    const latestPreviewEvent = [...state.initialEvents]
+      .reverse()
+      .find(
+        (
+          event,
+        ): event is Extract<AgentEvent, { type: "preview.ready" }> =>
+          event.type === "preview.ready",
+      );
+
+    return latestPreviewEvent?.url;
+  };
+
+  const syncPreviewHistory = (nextUrl?: string) => {
+    const resolvedUrl = nextUrl ?? uiState.previewUrl ?? getDefaultPreviewUrl();
+
+    if (!resolvedUrl) {
+      return;
+    }
+
+    if (previewHistory.index >= 0 && previewHistory.entries[previewHistory.index] === resolvedUrl) {
+      uiState = {
+        ...uiState,
+        previewUrl: resolvedUrl,
+      };
+      return;
+    }
+
+    const existingIndex = previewHistory.entries.lastIndexOf(resolvedUrl);
+    if (existingIndex >= 0) {
+      previewHistory = {
+        entries: previewHistory.entries,
+        index: existingIndex,
+      };
+    } else {
+      previewHistory = {
+        entries: [...previewHistory.entries.slice(0, previewHistory.index + 1), resolvedUrl],
+        index: previewHistory.index + 1,
+      };
+    }
+
+    uiState = {
+      ...uiState,
+      previewUrl: resolvedUrl,
+    };
+  };
 
   const render = () => {
+    syncPreviewHistory();
     state = {
       ...state,
       composerText: uiState.composerText,
@@ -964,6 +1021,10 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
         return;
       }
 
+      previewHistory = {
+        entries: [...previewHistory.entries.slice(0, previewHistory.index + 1), nextUrl],
+        index: previewHistory.index + 1,
+      };
       uiState = {
         ...uiState,
         previewUrl: nextUrl,
@@ -972,27 +1033,57 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
     });
 
     for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-preview-nav]"))) {
-      button.addEventListener("click", () => {
-        const action = button.dataset.previewNav;
+      const action = button.dataset.previewNav;
+      const disabled =
+        (action === "back" && previewHistory.index <= 0) ||
+        (action === "forward" && previewHistory.index >= previewHistory.entries.length - 1);
 
-        if (!previewFrame?.contentWindow) {
+      button.disabled = disabled;
+
+      button.addEventListener("click", () => {
+        if (action === "back") {
+          if (previewHistory.index <= 0) {
+            return;
+          }
+
+          previewHistory = {
+            ...previewHistory,
+            index: previewHistory.index - 1,
+          };
+          const nextPreviewUrl = previewHistory.entries[previewHistory.index];
+          uiState = {
+            ...uiState,
+            ...(nextPreviewUrl ? { previewUrl: nextPreviewUrl } : {}),
+          };
+          render();
           return;
         }
 
-        try {
-          if (action === "back") {
-            previewFrame.contentWindow.history.back();
-          } else if (action === "forward") {
-            previewFrame.contentWindow.history.forward();
-          } else if (action === "reload") {
-            previewFrame.contentWindow.location.reload();
+        if (action === "forward") {
+          if (previewHistory.index >= previewHistory.entries.length - 1) {
+            return;
           }
-        } catch {
+
+          previewHistory = {
+            ...previewHistory,
+            index: previewHistory.index + 1,
+          };
+          const nextPreviewUrl = previewHistory.entries[previewHistory.index];
           uiState = {
             ...uiState,
-            toast: "Preview navigation is unavailable for this page.",
+            ...(nextPreviewUrl ? { previewUrl: nextPreviewUrl } : {}),
           };
           render();
+          return;
+        }
+
+        if (action === "reload") {
+          if (!previewFrame) {
+            return;
+          }
+
+          const currentUrl = previewHistory.entries[previewHistory.index] ?? uiState.previewUrl;
+          previewFrame.src = currentUrl ?? previewFrame.src;
         }
       });
     }
