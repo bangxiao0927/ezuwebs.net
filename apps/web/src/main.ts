@@ -382,7 +382,237 @@ function escapePreviewHtml(value: string): string {
     .replaceAll(">", "&gt;");
 }
 
+function countMatches(value: string, pattern: RegExp): number {
+  return [...value.matchAll(pattern)].length;
+}
+
+function inferPreviewLanguage(filePath: string): string {
+  const extension = filePath.split(".").pop()?.toLowerCase();
+
+  if (!extension) {
+    return "text";
+  }
+
+  if (extension === "ts" || extension === "tsx") {
+    return "typescript";
+  }
+
+  if (extension === "js" || extension === "jsx") {
+    return "javascript";
+  }
+
+  if (extension === "md") {
+    return "markdown";
+  }
+
+  if (extension === "json") {
+    return "json";
+  }
+
+  if (extension === "yml" || extension === "yaml") {
+    return "yaml";
+  }
+
+  return extension;
+}
+
+function buildPreviewSummary(filePath: string, content: string): Array<{ label: string; value: string }> {
+  const lines = content.length === 0 ? 0 : content.split("\n").length;
+  const imports = countMatches(content, /^\s*import\s/mg);
+  const exports = countMatches(content, /^\s*export\s/mg);
+  const components = countMatches(content, /\bfunction\s+[A-Z]\w*|\bconst\s+[A-Z]\w*\s*=/g);
+
+  return [
+    { label: "Path", value: filePath },
+    { label: "Language", value: inferPreviewLanguage(filePath) },
+    { label: "Lines", value: String(lines) },
+    { label: "Imports", value: String(imports) },
+    { label: "Exports", value: String(exports) },
+    { label: "Components", value: String(components) },
+  ];
+}
+
+function buildRenderedPreview(filePath: string, content: string): string {
+  const extension = filePath.split(".").pop()?.toLowerCase();
+  const trimmed = content.trim();
+
+  if (extension === "html" || /^\s*<!doctype html>|^\s*<html[\s>]|^\s*<main[\s>]|^\s*<section[\s>]/i.test(trimmed)) {
+    return content;
+  }
+
+  const title = filePath.split("/").pop() ?? filePath;
+  const summary = buildPreviewSummary(filePath, content);
+  const highlighted = content
+    .split("\n")
+    .slice(0, 14)
+    .join("\n");
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #06101c;
+        --panel: rgba(10, 19, 31, 0.9);
+        --line: rgba(124, 196, 255, 0.18);
+        --text: #f5f7fb;
+        --muted: #8fa5c0;
+        --accent: #7cc4ff;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(124, 196, 255, 0.18), transparent 24%),
+          linear-gradient(180deg, #040812 0%, var(--bg) 100%);
+      }
+      main {
+        min-height: 100vh;
+        padding: 24px;
+        display: grid;
+        gap: 16px;
+        align-content: start;
+      }
+      .hero,
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        background: var(--panel);
+      }
+      .hero {
+        padding: 22px;
+        display: grid;
+        gap: 10px;
+      }
+      .eyebrow {
+        margin: 0;
+        color: var(--accent);
+        font-size: 12px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+      h1, h2, p, pre {
+        margin: 0;
+      }
+      h1 {
+        font-size: clamp(1.8rem, 4vw, 2.8rem);
+        line-height: 0.94;
+      }
+      p {
+        color: var(--muted);
+        line-height: 1.6;
+      }
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+        gap: 10px;
+      }
+      .chip {
+        padding: 12px 14px;
+        border-radius: 16px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .chip strong,
+      .chip span {
+        display: block;
+      }
+      .chip strong {
+        font-size: 0.74rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .chip span {
+        margin-top: 8px;
+        font-size: 0.95rem;
+        color: var(--text);
+        word-break: break-word;
+      }
+      .panel {
+        overflow: hidden;
+      }
+      .browser-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line);
+      }
+      .browser-dots {
+        display: flex;
+        gap: 8px;
+      }
+      .browser-dots span {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.3);
+      }
+      .browser-url {
+        flex: 1;
+        min-width: 0;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        background: rgba(255, 255, 255, 0.03);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      pre {
+        padding: 18px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <p class="eyebrow">Runtime Preview</p>
+        <h1>${escapePreviewHtml(title)}</h1>
+        <p>This file is not directly renderable as HTML, so the preview surfaces structure and code context instead.</p>
+        <div class="summary">
+          ${summary
+            .map(
+              (item) => `
+                <article class="chip">
+                  <strong>${escapePreviewHtml(item.label)}</strong>
+                  <span>${escapePreviewHtml(item.value)}</span>
+                </article>
+              `,
+            )
+            .join("")}
+        </div>
+      </section>
+      <section class="panel">
+        <div class="browser-bar">
+          <div class="browser-dots"><span></span><span></span><span></span></div>
+          <div class="browser-url">workspace://${escapePreviewHtml(filePath)}</div>
+        </div>
+        <pre>${escapePreviewHtml(highlighted)}</pre>
+      </section>
+    </main>
+  </body>
+</html>`;
+}
+
 function buildWorkspacePreviewDocument(filePath: string, content: string): string {
+  const renderedPreview = buildRenderedPreview(filePath, content);
+  const summary = buildPreviewSummary(filePath, content);
+
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -393,7 +623,8 @@ function buildWorkspacePreviewDocument(filePath: string, content: string): strin
       :root {
         color-scheme: dark;
         --bg: #060816;
-        --panel: #0d1422;
+        --panel: rgba(13, 20, 34, 0.82);
+        --panel-soft: rgba(11, 18, 30, 0.9);
         --line: rgba(171, 212, 255, 0.14);
         --text: #f5f7fb;
         --muted: #94a7c2;
@@ -414,11 +645,20 @@ function buildWorkspacePreviewDocument(filePath: string, content: string): strin
         gap: 16px;
         align-content: start;
       }
+      .layout {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+      }
       .card {
         border: 1px solid var(--line);
         border-radius: 18px;
-        background: rgba(13, 20, 34, 0.72);
+        background: var(--panel);
         padding: 20px;
+      }
+      .card-tight {
+        padding: 0;
+        overflow: hidden;
       }
       .eyebrow {
         margin: 0 0 8px;
@@ -427,9 +667,56 @@ function buildWorkspacePreviewDocument(filePath: string, content: string): strin
         letter-spacing: 0.12em;
         text-transform: uppercase;
       }
-      h1, p, pre { margin: 0; }
+      h1, h2, p, pre { margin: 0; }
       h1 { font-size: 1.6rem; }
+      h2 { font-size: 1rem; }
       p { color: var(--muted); line-height: 1.6; }
+      .meta-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 10px;
+        margin-top: 14px;
+      }
+      .meta-chip {
+        padding: 12px 14px;
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .meta-chip strong,
+      .meta-chip span {
+        display: block;
+      }
+      .meta-chip strong {
+        color: var(--muted);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .meta-chip span {
+        margin-top: 8px;
+        color: var(--text);
+        word-break: break-word;
+      }
+      .panel-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel-soft);
+      }
+      .panel-head code {
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .preview-stage {
+        min-height: 460px;
+        width: 100%;
+        border: 0;
+        background: white;
+      }
       pre {
         overflow: auto;
         white-space: pre-wrap;
@@ -438,6 +725,19 @@ function buildWorkspacePreviewDocument(filePath: string, content: string): strin
         font-size: 13px;
         line-height: 1.6;
       }
+      .source {
+        max-height: 560px;
+        padding: 18px;
+        background: rgba(8, 13, 22, 0.9);
+      }
+      @media (max-width: 900px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+        .preview-stage {
+          min-height: 320px;
+        }
+      }
     </style>
   </head>
   <body>
@@ -445,12 +745,46 @@ function buildWorkspacePreviewDocument(filePath: string, content: string): strin
       <section class="card">
         <p class="eyebrow">Runtime Preview</p>
         <h1>${escapePreviewHtml(filePath)}</h1>
-        <p>Preview generated from the current workspace virtual file content.</p>
+        <p>Preview generated from the current workspace file state, with a rendered surface and the underlying source side by side.</p>
+        <div class="meta-grid">
+          ${summary
+            .map(
+              (item) => `
+                <div class="meta-chip">
+                  <strong>${escapePreviewHtml(item.label)}</strong>
+                  <span>${escapePreviewHtml(item.value)}</span>
+                </div>
+              `,
+            )
+            .join("")}
+        </div>
       </section>
-      <section class="card">
-        <p class="eyebrow">File Content</p>
-        <pre>${escapePreviewHtml(content)}</pre>
-      </section>
+      <div class="layout">
+        <section class="card card-tight">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Rendered Surface</p>
+              <h2>workspace://${escapePreviewHtml(filePath)}</h2>
+            </div>
+            <code>live file snapshot</code>
+          </div>
+          <iframe
+            class="preview-stage"
+            srcdoc="${escapePreviewHtml(renderedPreview)}"
+            title="${escapePreviewHtml(filePath)} rendered preview"
+          ></iframe>
+        </section>
+        <section class="card card-tight">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Source</p>
+              <h2>${escapePreviewHtml(filePath)}</h2>
+            </div>
+            <code>${escapePreviewHtml(inferPreviewLanguage(filePath))}</code>
+          </div>
+          <pre class="source">${escapePreviewHtml(content)}</pre>
+        </section>
+      </div>
     </main>
   </body>
 </html>`;
