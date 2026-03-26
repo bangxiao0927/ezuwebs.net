@@ -771,20 +771,20 @@ function renderChatMessages(workbench: WorkbenchViewModel): string {
 export const webAppStyles = `
   :root {
     color-scheme: dark;
-    --bg: #0c0f14;
-    --bg-top: #0b0d12;
-    --panel: #12161d;
-    --panel-2: #171c24;
-    --panel-3: #0f1319;
-    --surface: #1b212b;
-    --surface-2: #202735;
-    --line: rgba(255, 255, 255, 0.08);
-    --line-strong: rgba(255, 255, 255, 0.14);
-    --text: #eef2ff;
-    --muted: #9aa4b2;
-    --dim: #7f8997;
-    --accent: #4f8cff;
-    --accent-soft: rgba(79, 140, 255, 0.16);
+    --bg: #060816;
+    --bg-top: #08101d;
+    --panel: #0d1422;
+    --panel-2: #101a2a;
+    --panel-3: #0a111d;
+    --surface: #131d2d;
+    --surface-2: #1a2436;
+    --line: rgba(171, 212, 255, 0.12);
+    --line-strong: rgba(171, 212, 255, 0.24);
+    --text: #f5f7fb;
+    --muted: #94a7c2;
+    --dim: #70819b;
+    --accent: #7cc4ff;
+    --accent-soft: rgba(124, 196, 255, 0.14);
     --success: #4ade80;
     --danger: #f87171;
     --shadow: 0 28px 90px rgba(0, 0, 0, 0.42);
@@ -799,9 +799,9 @@ export const webAppStyles = `
     margin: 0;
     min-height: 100%;
     background:
-      radial-gradient(circle at top left, rgba(79, 140, 255, 0.12), transparent 24%),
-      radial-gradient(circle at top right, rgba(45, 212, 191, 0.08), transparent 20%),
-      linear-gradient(180deg, #0a0c11 0%, #0c0f14 100%);
+      radial-gradient(circle at top left, rgba(124, 196, 255, 0.14), transparent 24%),
+      radial-gradient(circle at top right, rgba(124, 196, 255, 0.08), transparent 20%),
+      linear-gradient(180deg, #060816 0%, #09111d 100%);
     color: var(--text);
     font-family: Inter, "Segoe UI", sans-serif;
   }
@@ -830,7 +830,7 @@ export const webAppStyles = `
     border: 0;
     border-radius: 0;
     overflow: hidden;
-    background: rgba(10, 12, 17, 0.9);
+    background: rgba(6, 8, 22, 0.94);
     box-shadow: none;
   }
 
@@ -841,7 +841,7 @@ export const webAppStyles = `
     gap: 18px;
     padding: 12px 16px;
     border-bottom: 1px solid var(--line);
-    background: rgba(18, 21, 28, 0.96);
+    background: rgba(13, 20, 34, 0.96);
   }
 
   .workspace-topbar,
@@ -875,13 +875,24 @@ export const webAppStyles = `
 
   .toolbar-chip-active {
     background: var(--accent-soft);
-    border-color: rgba(79, 140, 255, 0.5);
+    border-color: rgba(124, 196, 255, 0.5);
     color: #dbe7ff;
   }
 
   .brand-mark {
     font-style: italic;
     font-weight: 800;
+  }
+
+  .brand-home {
+    padding: 0;
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .brand-home:hover {
+    border-color: rgba(124, 196, 255, 0.5);
+    background: var(--accent-soft);
   }
 
   .topbar-title {
@@ -907,8 +918,8 @@ export const webAppStyles = `
   }
 
   .topbar-button-primary {
-    background: #f6f7fb;
-    color: #111827;
+    background: #7cc4ff;
+    color: #08101d;
     font-weight: 600;
   }
 
@@ -1791,7 +1802,7 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
       <div class="workspace-shell" data-view-mode="${escapeHtml(viewMode)}">
         <header class="workspace-topbar">
           <div class="topbar-left">
-            <div class="brand-mark">EZ</div>
+            <button class="brand-mark brand-home" data-go-home type="button" aria-label="Back to homepage">EZ</button>
             <div class="avatar">E</div>
             <div class="topbar-crumbs">
               <span class="topbar-title">${escapeHtml(shell.topBar.projectName)}</span>

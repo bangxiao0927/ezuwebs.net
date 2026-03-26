@@ -177,7 +177,9 @@ export async function createDemoBootstrap(sessionId = "club-promo"): Promise<Web
   const dropMessageIds = new Set(
     agentEvents
       .filter(
-        (event) =>
+        (
+          event,
+        ): event is Extract<AgentEvent, { type: "message.delta" }> =>
           event.type === "message.delta" &&
           /Bolt|Planner is translating|Update page block/i.test(event.text),
       )
