@@ -694,24 +694,6 @@ function renderSessionTerminal(workbench: WorkbenchViewModel): string {
     .join("");
 }
 
-function splitPreviewUrl(previewUrl: string): { origin: string; path: string } {
-  try {
-    const parsed = new URL(previewUrl, "http://localhost");
-    const path = `${parsed.pathname}${parsed.search}${parsed.hash}` || "/";
-    const hasExplicitOrigin = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(previewUrl);
-
-    return {
-      origin: hasExplicitOrigin ? parsed.origin : "",
-      path,
-    };
-  } catch {
-    return {
-      origin: "",
-      path: previewUrl,
-    };
-  }
-}
-
 function renderSessionPreview(
   workbench: WorkbenchViewModel,
   options: {
@@ -728,8 +710,6 @@ function renderSessionPreview(
     return `<div class="empty-state dark-empty">No live preview yet</div>`;
   }
 
-  const location = splitPreviewUrl(resolvedPreviewUrl);
-
   return `
     <div class="browser-frame">
       <div class="browser-toolbar">
@@ -740,22 +720,13 @@ function renderSessionPreview(
         </div>
         <form class="browser-url-form" data-preview-form>
           <input
-            class="browser-origin"
-            data-preview-origin-input
-            name="origin"
-            value="${escapeHtml(location.origin)}"
+            class="browser-url"
+            data-preview-url-input
+            name="url"
+            value="${escapeHtml(resolvedPreviewUrl)}"
             spellcheck="false"
             autocomplete="off"
             placeholder="https://example.com"
-          />
-          <input
-            class="browser-url"
-            data-preview-path-input
-            name="path"
-            value="${escapeHtml(location.path)}"
-            spellcheck="false"
-            autocomplete="off"
-            placeholder="/"
           />
         </form>
         <button class="browser-action" data-preview-open type="button" aria-label="Open in new tab">↗</button>
@@ -1629,16 +1600,19 @@ export const webAppStyles = `
 
   .browser-url-form {
     flex: 1;
-    display: grid;
-    grid-template-columns: minmax(180px, 0.42fr) minmax(0, 1fr);
-    gap: 10px;
   }
 
-  .browser-origin,
+  .workspace-path-form {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .workspace-path-input,
   .browser-url {
     min-width: 0;
     border: 1px solid var(--line);
-    border-radius: 999px;
+    border-radius: 12px;
     padding: 8px 12px;
     color: var(--text);
     background: #161c25;
@@ -1646,15 +1620,27 @@ export const webAppStyles = `
     outline: none;
   }
 
-  .browser-origin::placeholder,
+  .workspace-path-input::placeholder,
   .browser-url::placeholder {
     color: var(--dim);
   }
 
-  .browser-origin:focus,
+  .workspace-path-input:focus,
   .browser-url:focus {
     border-color: rgba(124, 196, 255, 0.4);
     box-shadow: 0 0 0 3px rgba(124, 196, 255, 0.08);
+  }
+
+  .workspace-path-input {
+    min-width: min(520px, 100%);
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .browser-url {
+    width: 100%;
+    border-radius: 999px;
   }
 
   .browser-url {
@@ -1909,11 +1895,6 @@ export const webAppStyles = `
       align-items: flex-start;
     }
 
-    .browser-url-form {
-      width: 100%;
-      grid-template-columns: 1fr;
-    }
-
     .preview-tabs {
       width: 100%;
       flex-wrap: wrap;
@@ -2000,10 +1981,17 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
 
           <section class="preview-shell">
             <div class="preview-topbar">
-              <div>
+              <form class="workspace-path-form" data-workspace-path-form>
                 <p class="eyebrow">Workspace</p>
-                <strong>${escapeHtml(activeFile.replace(/\//g, " > "))}</strong>
-              </div>
+                <input
+                  class="workspace-path-input"
+                  data-workspace-path-input
+                  name="path"
+                  value="${escapeHtml(activeFile)}"
+                  spellcheck="false"
+                  autocomplete="off"
+                />
+              </form>
               <div class="preview-tabs">
                 <button
                   class="preview-tab ${viewMode === "preview" ? "preview-tab-active" : ""}"
