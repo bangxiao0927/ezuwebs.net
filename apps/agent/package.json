@@ -7,7 +7,8 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm -w build && node --test \"dist/apps/agent/src/index.test.js\""
   },
   "dependencies": {
     "@ezu/core": "workspace:*",

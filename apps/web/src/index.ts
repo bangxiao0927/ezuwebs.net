@@ -6,6 +6,8 @@ import {
 } from "@ezu/ui";
 import { type ActionState, type AgentEvent, type PendingInteraction } from "@ezu/protocol";
 
+export { createReplacementPrompt } from "./replacement.js";
+
 export type PatchActionState = ActionState & {
   action: Extract<ActionState["action"], { type: "file.patch" }>;
 };
@@ -94,6 +96,7 @@ export interface InteractiveWebEditResponse {
   nextState: InteractiveWebEditorState;
   suggestedPrompt: string;
 }
+
 
 export function reduceWorkbenchEvents(
   input: Pick<WebAppBootstrap, "initialEvents" | "projectId" | "sessionId">,

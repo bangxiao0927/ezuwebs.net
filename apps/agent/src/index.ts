@@ -10,6 +10,8 @@ import { createModelGateway } from "@ezu/model-gateway";
 import { type AgentEvent } from "@ezu/protocol";
 import { createBrowserRuntimeStub } from "@ezu/runtime-browser";
 
+import { createReplacementStructurePatch, normalizeReason } from "./replacement.js";
+
 export interface AgentAppOptions {
   sessionId: string;
   projectId: string;
@@ -24,80 +26,6 @@ export interface BlockEditDemoOptions extends AgentAppOptions {
 export interface ReplacementBlockEditDemoOptions extends BlockEditDemoOptions {
   rejectedPatch: string;
   rejectionReason: string;
-}
-
-function normalizeReason(reason: string): string {
-  return reason.trim().replace(/\s+/g, " ");
-}
-
-function inferStructuralChanges(reason: string): string[] {
-  const normalizedReason = reason.toLowerCase();
-  const changes: string[] = [];
-
-  if (
-    normalizedReason.includes("layout") ||
-    normalizedReason.includes("结构") ||
-    normalizedReason.includes("hierarchy") ||
-    normalizedReason.includes("层级")
-  ) {
-    changes.push("Rebuild the block hierarchy instead of tweaking labels in place.");
-  }
-
-  if (
-    normalizedReason.includes("copy") ||
-    normalizedReason.includes("文案") ||
-    normalizedReason.includes("wording") ||
-    normalizedReason.includes("text")
-  ) {
-    changes.push("Rewrite the visible copy so the replacement communicates the requested intent directly.");
-  }
-
-  if (
-    normalizedReason.includes("visual") ||
-    normalizedReason.includes("style") ||
-    normalizedReason.includes("颜色") ||
-    normalizedReason.includes("样式")
-  ) {
-    changes.push("Change the visual treatment so the replacement is distinguishable from the rejected version.");
-  }
-
-  if (
-    normalizedReason.includes("focus") ||
-    normalizedReason.includes("emphasis") ||
-    normalizedReason.includes("priority") ||
-    normalizedReason.includes("突出")
-  ) {
-    changes.push("Reorder emphasis so the most important state or action is surfaced first.");
-  }
-
-  if (changes.length === 0) {
-    changes.push("Restructure the block around the rejection reason instead of reusing the prior patch shape.");
-  }
-
-  return changes;
-}
-
-function createReplacementStructurePatch(options: ReplacementBlockEditDemoOptions, coderModel: string): string {
-  const normalizedReason = normalizeReason(options.rejectionReason);
-  const structuralChanges = inferStructuralChanges(normalizedReason);
-
-  return [
-    `// replacement-structure:${options.blockId}`,
-    "export const replacementStructurePatchPreview = {",
-    `  blockId: '${options.blockId}',`,
-    `  targetPath: '${options.targetPath}',`,
-    "  strategy: 'replace_structure',",
-    `  rejectionReason: ${JSON.stringify(normalizedReason)},`,
-    `  previousPatchSummary: ${JSON.stringify(options.rejectedPatch.split("\n")[0] ?? "")},`,
-    `  replacementPrompt: ${JSON.stringify(options.suggestedPrompt)},`,
-    `  structuralChanges: ${JSON.stringify(structuralChanges)},`,
-    `  avoid: ${JSON.stringify([
-      "Do not fall back to the rejected patch structure.",
-      "Do not treat the replacement as a copy-only cleanup when the rejection asks for broader changes.",
-    ])},`,
-    `  coderModel: '${coderModel}',`,
-    "};",
-  ].join("\n");
 }
 
 function applyEvent(session: ReturnType<typeof createSessionState>, events: AgentEvent[], event: AgentEvent) {

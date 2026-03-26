@@ -13,6 +13,7 @@ import {
   type InteractiveWebEditRequest,
   type WebAppBootstrap,
 } from "./index";
+import { createReplacementPrompt } from "./replacement.js";
 
 function ensureStyles(documentRef: Document): void {
   const existing = documentRef.getElementById("web-app-styles");
@@ -34,16 +35,6 @@ function getSelectedBlock(bootstrap: WebAppBootstrap) {
   const selectedBlockId = editorState.selectedBlockId;
 
   return blocks.find((block) => block.id === selectedBlockId) ?? blocks[0];
-}
-
-function createReplacementPrompt(basePrompt: string, rejectionReason: string): string {
-  return [
-    basePrompt,
-    `Rejected because: ${rejectionReason}.`,
-    "Redo the patch from scratch based on that rejection reason.",
-    "Do not reuse the previous structure if it conflicts with the rejection reason.",
-    "Make the replacement visibly address the cited issue instead of applying a generic template.",
-  ].join(" ");
 }
 
 export async function mountDemoApp(target: HTMLElement = document.body): Promise<void> {
