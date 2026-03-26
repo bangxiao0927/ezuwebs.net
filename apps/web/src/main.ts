@@ -21,6 +21,7 @@ type UiState = {
   composerText: string;
   activeFile?: string;
   viewMode: ViewMode;
+  previewUrl?: string;
   toast?: string;
 };
 
@@ -335,6 +336,24 @@ function goHome(): void {
     history.pushState("", document.title, `${location.pathname}${location.search}`);
   }
   void mount();
+}
+
+function normalizePreviewUrl(value: string): string {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  if (/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(trimmed) || trimmed.startsWith("/")) {
+    return trimmed;
+  }
+
+  if (/^(localhost|127\.0\.0\.1|0\.0\.0\.0)/.test(trimmed)) {
+    return `http://${trimmed}`;
+  }
+
+  return `https://${trimmed}`;
 }
 
 function renderSessionLauncher(): string {
@@ -850,6 +869,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
       ...state,
       viewMode: uiState.viewMode,
       ...(uiState.activeFile ? { activeFile: uiState.activeFile } : {}),
+      ...(uiState.previewUrl ? { previewUrl: uiState.previewUrl } : {}),
     };
     target.innerHTML = `${renderWebAppBody(renderState)}${renderDialog(state, uiState)}`;
 
@@ -932,6 +952,60 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
         render();
       });
     }
+
+    const previewFrame = target.querySelector<HTMLIFrameElement>("[data-preview-frame]");
+    const previewInput = target.querySelector<HTMLInputElement>("[data-preview-input]");
+
+    target.querySelector<HTMLFormElement>("[data-preview-form]")?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const nextUrl = normalizePreviewUrl(previewInput?.value ?? "");
+
+      if (!nextUrl) {
+        return;
+      }
+
+      uiState = {
+        ...uiState,
+        previewUrl: nextUrl,
+      };
+      render();
+    });
+
+    for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-preview-nav]"))) {
+      button.addEventListener("click", () => {
+        const action = button.dataset.previewNav;
+
+        if (!previewFrame?.contentWindow) {
+          return;
+        }
+
+        try {
+          if (action === "back") {
+            previewFrame.contentWindow.history.back();
+          } else if (action === "forward") {
+            previewFrame.contentWindow.history.forward();
+          } else if (action === "reload") {
+            previewFrame.contentWindow.location.reload();
+          }
+        } catch {
+          uiState = {
+            ...uiState,
+            toast: "Preview navigation is unavailable for this page.",
+          };
+          render();
+        }
+      });
+    }
+
+    target.querySelector<HTMLButtonElement>("[data-preview-open]")?.addEventListener("click", () => {
+      const url = previewInput?.value.trim() ?? previewFrame?.src ?? "";
+
+      if (!url) {
+        return;
+      }
+
+      window.open(normalizePreviewUrl(url), "_blank", "noopener,noreferrer");
+    });
 
     const form = target.querySelector<HTMLFormElement>('[data-editor-form="interactive-web-editor"]');
 

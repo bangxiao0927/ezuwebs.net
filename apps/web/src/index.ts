@@ -27,6 +27,7 @@ export interface WebAppBootstrap {
   composerText?: string;
   activeFile?: string;
   viewMode?: ViewMode;
+  previewUrl?: string;
 }
 
 export type ViewMode = "preview" | "code" | "diff";
@@ -690,26 +691,38 @@ function renderSessionTerminal(workbench: WorkbenchViewModel): string {
     .join("");
 }
 
-function renderSessionPreview(workbench: WorkbenchViewModel): string {
+function renderSessionPreview(workbench: WorkbenchViewModel, previewUrl?: string): string {
   const activePreview = workbench.previews[workbench.previews.length - 1];
+  const resolvedPreviewUrl = previewUrl ?? activePreview?.url;
 
-  if (!activePreview) {
+  if (!resolvedPreviewUrl) {
     return `<div class="empty-state dark-empty">No live preview yet</div>`;
   }
 
   return `
     <div class="browser-frame">
       <div class="browser-toolbar">
-        <div class="browser-dots">
-          <span></span>
-          <span></span>
-          <span></span>
+        <div class="browser-actions">
+          <button class="browser-action" data-preview-nav="back" type="button" aria-label="Go back">←</button>
+          <button class="browser-action" data-preview-nav="forward" type="button" aria-label="Go forward">→</button>
+          <button class="browser-action" data-preview-nav="reload" type="button" aria-label="Reload">↻</button>
         </div>
-        <div class="browser-url">${escapeHtml(activePreview.url)}</div>
+        <form class="browser-url-form" data-preview-form>
+          <input
+            class="browser-url"
+            data-preview-input
+            name="url"
+            value="${escapeHtml(resolvedPreviewUrl)}"
+            spellcheck="false"
+            autocomplete="off"
+          />
+        </form>
+        <button class="browser-action" data-preview-open type="button" aria-label="Open in new tab">↗</button>
       </div>
       <iframe
         class="preview-frame"
-        src="${escapeHtml(activePreview.url)}"
+        data-preview-frame
+        src="${escapeHtml(resolvedPreviewUrl)}"
         title="Live browser runtime preview"
         loading="lazy"
       ></iframe>
@@ -1034,20 +1047,31 @@ export const webAppStyles = `
   }
 
   .preview-body {
+    min-height: 0;
     padding: 16px;
-    overflow: auto;
+    display: grid;
+  }
+
+  .workspace-shell[data-view-mode="preview"] .preview-body {
+    padding: 0;
+    overflow: hidden;
   }
 
   .workspace-shell[data-view-mode="preview"] .preview-panel,
   .workspace-shell[data-view-mode="code"] .code-panel,
   .workspace-shell[data-view-mode="diff"] .diff-panel {
-    display: block;
+    display: grid;
   }
 
   .preview-panel,
   .code-panel,
   .diff-panel {
     display: none;
+    min-height: 0;
+  }
+
+  .preview-panel {
+    height: 100%;
   }
 
   .eyebrow {
@@ -1514,30 +1538,49 @@ export const webAppStyles = `
   .browser-frame {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
+    height: 100%;
     min-height: 0;
-    padding: 14px;
-    gap: 12px;
+    gap: 0;
   }
 
   .browser-toolbar {
     display: flex;
     align-items: center;
     gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(13, 20, 34, 0.92);
   }
 
-  .browser-dots {
+  .browser-actions {
     display: flex;
     gap: 8px;
   }
 
-  .browser-dots span {
-    width: 10px;
-    height: 10px;
+  .browser-action {
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--line);
     border-radius: 999px;
-    background: #5f6b7b;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .browser-action:hover {
+    border-color: var(--line-strong);
+    background: var(--accent-soft);
+  }
+
+  .browser-url-form {
+    flex: 1;
   }
 
   .browser-url {
+    width: 100%;
     flex: 1;
     border: 1px solid var(--line);
     border-radius: 999px;
@@ -1553,16 +1596,10 @@ export const webAppStyles = `
   .preview-frame {
     width: 100%;
     height: 100%;
-    min-height: 320px;
-    border: 1px solid var(--line);
-    border-radius: 14px;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
     background: white;
-  }
-
-  .preview-controls {
-    display: grid;
-    gap: 10px;
-    padding: 0 14px 14px;
   }
 
   .preview-stack {
@@ -1883,24 +1920,6 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
             <div class="preview-body">
               <div class="preview-panel">
                 ${renderSessionPreview(workbench)}
-                <div class="preview-controls">
-                  <div class="preview-stack">
-                    ${workbench.webEditor.blocks
-                      .map(
-                        (block) => `
-                          <button
-                            type="button"
-                            class="preview-block ${block.id === workbench.webEditor.selectedBlockId ? "preview-block-active" : ""}"
-                            data-preview-block-id="${escapeHtml(block.id)}"
-                          >
-                            <span class="preview-block-label">${escapeHtml(block.label)}</span>
-                            <span class="preview-block-path">${escapeHtml(block.selector)}</span>
-                          </button>
-                        `,
-                      )
-                      .join("")}
-                  </div>
-                </div>
               </div>
               <div class="code-panel">
                 ${renderEditorCode(workbench)}
