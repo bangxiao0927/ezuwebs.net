@@ -492,7 +492,7 @@ function renderWebEditor(state: InteractiveWebEditorState): string {
   `;
 }
 
-function renderPreviewSelection(state: InteractiveWebEditorState): string {
+function renderPreviewSelection(state: InteractiveWebEditorState, previewUrl?: string): string {
   const selectedBlock =
     state.blocks.find((block) => block.id === state.selectedBlockId) ?? state.blocks[0];
 
@@ -520,6 +520,21 @@ function renderPreviewSelection(state: InteractiveWebEditorState): string {
         <h3>${escapeHtml(selectedBlock?.label ?? "No block selected")}</h3>
         <p>${escapeHtml(selectedBlock?.html ?? "No HTML snapshot")}</p>
       </div>
+      ${
+        previewUrl
+          ? `
+            <div class="card preview-detail">
+              <p class="eyebrow">Live Preview</p>
+              <iframe
+                class="preview-frame"
+                src="${escapeHtml(previewUrl)}"
+                title="Live browser runtime preview"
+                loading="lazy"
+              ></iframe>
+            </div>
+          `
+          : ""
+      }
     </div>
   `;
 }
@@ -986,6 +1001,14 @@ export const webAppStyles = `
     background: rgba(255, 251, 245, 0.74);
   }
 
+  .preview-frame {
+    width: 100%;
+    min-height: 360px;
+    border: 1px solid rgba(100, 78, 53, 0.12);
+    border-radius: 18px;
+    background: #fffdf8;
+  }
+
   .timeline-action-button {
     width: 100%;
     border: 0;
@@ -1186,6 +1209,7 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
   const shell = createWebAppShell(input);
   const { workbench } = shell;
   const uniqueFiles = [...new Set([...workbench.files, ...(workbench.selectedBlockFile ? [workbench.selectedBlockFile] : [])])];
+  const activePreview = workbench.previews[workbench.previews.length - 1];
 
   return `
     <main class="app-shell">
@@ -1449,7 +1473,7 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
                           )
                           .join("")}
                       </ul>
-                      ${renderPreviewSelection(workbench.webEditor)}
+                      ${renderPreviewSelection(workbench.webEditor, activePreview?.url)}
                     `
                     : `<div class="empty-state">No live preview yet</div>`
                 }

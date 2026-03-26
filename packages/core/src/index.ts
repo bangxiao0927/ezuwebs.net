@@ -23,6 +23,7 @@ export interface RuntimeAdapter {
   patchFile(path: string, patch: string): Promise<void>;
   listFiles(root: string): Promise<string[]>;
   runCommand(command: string, opts?: { cwd?: string }): Promise<RuntimeProcess>;
+  openPreview(port?: number): Promise<RuntimePort>;
   watchFiles(cb: (event: { path: string; type: string }) => void): Promise<() => void>;
   watchPorts(
     cb: (event: { port: number; url: string; status: "open" | "close" }) => void,
@@ -309,6 +310,10 @@ export function createExecutor(input: {
           action.action.command,
           action.action.cwd ? { cwd: action.action.cwd } : undefined,
         );
+      }
+
+      if (action.action.type === "preview.open") {
+        await input.runtime.openPreview(action.action.port);
       }
 
       return {

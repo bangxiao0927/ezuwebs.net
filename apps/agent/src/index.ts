@@ -5,6 +5,7 @@ import {
   createSessionState,
   createSessionStore,
   createTimelineAction,
+  type RuntimeAdapter,
 } from "@ezu/core";
 import { createModelGateway } from "@ezu/model-gateway";
 import { type AgentEvent } from "@ezu/protocol";
@@ -33,6 +34,35 @@ function applyEvent(session: ReturnType<typeof createSessionState>, events: Agen
   return applyAgentEvent(session, event);
 }
 
+async function bridgeRuntimeEvents(input: {
+  runtime: RuntimeAdapter;
+  apply: (event: AgentEvent) => void;
+}): Promise<() => void> {
+  const stopFiles = await input.runtime.watchFiles((event) => {
+    input.apply({
+      type: "file.changed",
+      path: event.path,
+    });
+  });
+
+  const stopPorts = await input.runtime.watchPorts((event) => {
+    if (event.status !== "open") {
+      return;
+    }
+
+    input.apply({
+      type: "preview.ready",
+      url: event.url,
+      port: event.port,
+    });
+  });
+
+  return () => {
+    stopFiles();
+    stopPorts();
+  };
+}
+
 export async function bootstrapBlockEditDemo(
   options: BlockEditDemoOptions,
 ): Promise<AgentEvent[]> {
@@ -49,6 +79,12 @@ export async function bootstrapBlockEditDemo(
   const runtime = createBrowserRuntimeStub();
   const executor = createExecutor({ runtime, sessionStore });
   const messageId = crypto.randomUUID();
+  const stopBridging = await bridgeRuntimeEvents({
+    runtime,
+    apply: (event) => {
+      session = applyEvent(session, events, event);
+    },
+  });
 
   session = applyEvent(session, events, {
     type: "message.delta",
@@ -139,15 +175,23 @@ export async function bootstrapBlockEditDemo(
     action: completedFileAction,
   });
 
-  session = applyEvent(session, events, {
-    type: "file.changed",
-    path: options.targetPath,
+  const previewAction = createTimelineAction({
+    source: "system",
+    action: {
+      type: "preview.open",
+      port: 4173,
+    },
   });
 
   session = applyEvent(session, events, {
-    type: "preview.ready",
-    url: `http://localhost:4173?block=${encodeURIComponent(options.blockId)}`,
-    port: 4173,
+    type: "action.created",
+    action: previewAction,
+  });
+
+  const completedPreviewAction = await executor.enqueue(previewAction);
+  session = applyEvent(session, events, {
+    type: "action.updated",
+    action: completedPreviewAction,
   });
 
   session = applyEvent(session, events, {
@@ -156,6 +200,7 @@ export async function bootstrapBlockEditDemo(
   });
 
   sessionStore.upsert(session);
+  stopBridging();
 
   return events;
 }
@@ -173,6 +218,12 @@ export async function bootstrapReplacementBlockEditDemo(
   const runtime = createBrowserRuntimeStub();
   const executor = createExecutor({ runtime, sessionStore });
   const messageId = crypto.randomUUID();
+  const stopBridging = await bridgeRuntimeEvents({
+    runtime,
+    apply: (event) => {
+      session = applyEvent(session, events, event);
+    },
+  });
 
   session = applyEvent(session, events, {
     type: "message.delta",
@@ -243,15 +294,23 @@ export async function bootstrapReplacementBlockEditDemo(
     action: completedReplacementAction,
   });
 
-  session = applyEvent(session, events, {
-    type: "file.changed",
-    path: options.targetPath,
+  const previewAction = createTimelineAction({
+    source: "system",
+    action: {
+      type: "preview.open",
+      port: 4173,
+    },
   });
 
   session = applyEvent(session, events, {
-    type: "preview.ready",
-    url: `http://localhost:4173?block=${encodeURIComponent(options.blockId)}&mode=replacement`,
-    port: 4173,
+    type: "action.created",
+    action: previewAction,
+  });
+
+  const completedPreviewAction = await executor.enqueue(previewAction);
+  session = applyEvent(session, events, {
+    type: "action.updated",
+    action: completedPreviewAction,
   });
 
   session = applyEvent(session, events, {
@@ -260,6 +319,7 @@ export async function bootstrapReplacementBlockEditDemo(
   });
 
   sessionStore.upsert(session);
+  stopBridging();
 
   return events;
 }
@@ -270,18 +330,27 @@ export async function bootstrapAgentApp(options: AgentAppOptions): Promise<Agent
     id: options.sessionId,
     projectId: options.projectId,
   });
+  const events: AgentEvent[] = [];
 
   sessionStore.upsert(session);
 
   const gateway = createModelGateway();
   const runtime = createBrowserRuntimeStub();
   const executor = createExecutor({ runtime, sessionStore });
-  const { session: plannedSession, events } = await collectEventStream(
+  const stopBridging = await bridgeRuntimeEvents({
+    runtime,
+    apply: (event) => {
+      session = applyAgentEvent(session, event);
+      events.push(event);
+    },
+  });
+  const { session: plannedSession, events: plannedEvents } = await collectEventStream(
     session,
     gateway.streamPlan({
       prompt: "Initialize the workspace code structure for the new AI IDE.",
     }),
   );
+  events.push(...plannedEvents);
 
   session = plannedSession;
   sessionStore.upsert(session);
@@ -299,7 +368,6 @@ export async function bootstrapAgentApp(options: AgentAppOptions): Promise<Agent
       ].join("\n"),
     },
   });
-  const generatedBootstrapPath = "apps/web/src/generated-bootstrap.ts";
 
   const previewAction = createTimelineAction({
     source: "system",
@@ -324,13 +392,6 @@ export async function bootstrapAgentApp(options: AgentAppOptions): Promise<Agent
   events.push(updatedFileEvent);
   session = applyAgentEvent(session, updatedFileEvent);
 
-  const fileChangedEvent: AgentEvent = {
-    type: "file.changed",
-    path: generatedBootstrapPath,
-  };
-  events.push(fileChangedEvent);
-  session = applyAgentEvent(session, fileChangedEvent);
-
   const createdPreviewEvent: AgentEvent = {
     type: "action.created",
     action: previewAction,
@@ -340,22 +401,10 @@ export async function bootstrapAgentApp(options: AgentAppOptions): Promise<Agent
 
   const completedPreviewEvent: AgentEvent = {
     type: "action.updated",
-    action: {
-      ...previewAction,
-      status: "completed",
-      updatedAt: new Date().toISOString(),
-    },
+    action: await executor.enqueue(previewAction),
   };
   events.push(completedPreviewEvent);
   session = applyAgentEvent(session, completedPreviewEvent);
-
-  const previewReadyEvent: AgentEvent = {
-    type: "preview.ready",
-    url: "http://localhost:4173",
-    port: 4173,
-  };
-  events.push(previewReadyEvent);
-  session = applyAgentEvent(session, previewReadyEvent);
 
   const profileMessageEvent: AgentEvent = {
     type: "message.delta",
@@ -373,6 +422,7 @@ export async function bootstrapAgentApp(options: AgentAppOptions): Promise<Agent
   session = applyAgentEvent(session, profileCompletedEvent);
 
   sessionStore.upsert(session);
+  stopBridging();
 
   return events;
 }
