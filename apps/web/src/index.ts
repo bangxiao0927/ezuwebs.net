@@ -1552,7 +1552,7 @@ export const webAppStyles = `
 
   .browser-frame {
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
     height: 100%;
     min-height: 0;
     gap: 0;
@@ -1602,51 +1602,28 @@ export const webAppStyles = `
     flex: 1;
   }
 
-  .workspace-path-form {
-    display: grid;
-    gap: 6px;
-    min-width: 0;
-  }
-
-  .workspace-path-input,
   .browser-url {
+    width: 100%;
     min-width: 0;
     border: 1px solid var(--line);
-    border-radius: 12px;
+    border-radius: 999px;
     padding: 8px 12px;
     color: var(--text);
     background: #161c25;
     font-size: 0.85rem;
     outline: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .workspace-path-input::placeholder,
   .browser-url::placeholder {
     color: var(--dim);
   }
 
-  .workspace-path-input:focus,
   .browser-url:focus {
     border-color: rgba(124, 196, 255, 0.4);
     box-shadow: 0 0 0 3px rgba(124, 196, 255, 0.08);
-  }
-
-  .workspace-path-input {
-    min-width: min(520px, 100%);
-    font-size: 0.95rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-  }
-
-  .browser-url {
-    width: 100%;
-    border-radius: 999px;
-  }
-
-  .browser-url {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .browser-loading {

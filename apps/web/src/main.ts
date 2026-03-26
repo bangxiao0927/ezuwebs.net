@@ -351,7 +351,7 @@ function normalizePreviewUrl(value: string): string {
     return trimmed;
   }
 
-  if (/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(trimmed) || trimmed.startsWith("/")) {
+  if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed) || trimmed.startsWith("/")) {
     return trimmed;
   }
 
@@ -360,6 +360,15 @@ function normalizePreviewUrl(value: string): string {
   }
 
   return `https://${trimmed}`;
+}
+
+function isUsablePreviewUrl(value: string | undefined): value is string {
+  if (!value) {
+    return false;
+  }
+
+  const trimmed = value.trim().toLowerCase();
+  return trimmed.length > 0 && trimmed !== "about:blank";
 }
 
 function renderSessionLauncher(): string {
@@ -886,7 +895,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
   const syncPreviewHistory = (nextUrl?: string) => {
     const resolvedUrl = nextUrl ?? uiState.previewUrl ?? getDefaultPreviewUrl();
 
-    if (!resolvedUrl) {
+    if (!isUsablePreviewUrl(resolvedUrl)) {
       return;
     }
 
@@ -1024,13 +1033,23 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
       let nextUrl = previewFrame.src;
 
       try {
+        previewFrame.contentWindow?.scrollTo(0, 0);
+      } catch {
+        // Ignore cross-origin or unavailable scroll access.
+      }
+
+      try {
         nextUrl = previewFrame.contentWindow?.location.href ?? nextUrl;
       } catch {
         nextUrl = previewFrame.src;
       }
 
       const normalized = normalizePreviewUrl(nextUrl);
-      if (!normalized) {
+      if (!isUsablePreviewUrl(normalized)) {
+        uiState = {
+          ...uiState,
+          previewLoading: false,
+        };
         return;
       }
 
