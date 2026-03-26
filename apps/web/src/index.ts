@@ -24,6 +24,7 @@ export interface WebAppBootstrap {
   projectId: string;
   webEditor?: Partial<InteractiveWebEditorState>;
   selectedDiffActionId?: string;
+  composerText?: string;
 }
 
 export interface WorkbenchViewModel {
@@ -634,573 +635,777 @@ function renderDiffPanel(workbench: WorkbenchViewModel): string {
   `;
 }
 
+function renderEditorCode(workbench: WorkbenchViewModel): string {
+  const content =
+    workbench.selectedDiffAction?.action.patch ??
+    workbench.selectedBlock?.html ??
+    workbench.webEditor.suggestedPrompt ??
+    "No editor content available yet.";
+  const lines = content.split("\n");
+
+  return `
+    <div class="code-view">
+      <ol class="line-numbers">
+        ${lines.map((_, index) => `<li>${String(index + 1)}</li>`).join("")}
+      </ol>
+      <ol class="code-lines">
+        ${lines.map((line) => `<li class="code-line">${escapeHtml(line || " ")}</li>`).join("")}
+      </ol>
+    </div>
+  `;
+}
+
+function renderSessionTerminal(workbench: WorkbenchViewModel): string {
+  const preview = workbench.previews[workbench.previews.length - 1];
+  const fileAction = [...workbench.actions]
+    .reverse()
+    .find((action) => action.action.type === "file.write" || action.action.type === "file.patch");
+  const lines = [
+    "Network: browser runtime ready",
+    "watching session state and runtime events",
+    fileAction ? `$ sync ${summarizeAction(fileAction.action)}` : "$ waiting for file activity",
+    preview ? `preview ready: ${preview.url}` : "preview pending",
+    "",
+    `session:${workbench.chatMessages.length}-messages plan:${workbench.plan.length}-steps`,
+    "~/project $",
+  ];
+
+  return lines
+    .map((line, index) => {
+      if (index === 0) {
+        return `<p><span class="terminal-dot"></span> ${escapeHtml(line)}</p>`;
+      }
+
+      if (line.startsWith("$") || line.startsWith("~/")) {
+        return `<p><span class="terminal-accent">${escapeHtml(line)}</span></p>`;
+      }
+
+      return `<p>${escapeHtml(line)}</p>`;
+    })
+    .join("");
+}
+
+function renderSessionPreview(workbench: WorkbenchViewModel): string {
+  const activePreview = workbench.previews[workbench.previews.length - 1];
+
+  if (!activePreview) {
+    return `<div class="empty-state dark-empty">No live preview yet</div>`;
+  }
+
+  return `
+    <div class="browser-frame">
+      <div class="browser-toolbar">
+        <div class="browser-dots">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="browser-url">${escapeHtml(activePreview.url)}</div>
+      </div>
+      <iframe
+        class="preview-frame"
+        src="${escapeHtml(activePreview.url)}"
+        title="Live browser runtime preview"
+        loading="lazy"
+      ></iframe>
+    </div>
+  `;
+}
+
 export const webAppStyles = `
   :root {
-    color-scheme: light;
-    --bg: #f4efe7;
-    --bg-strong: #ebe2d4;
-    --panel: rgba(255, 251, 245, 0.86);
-    --panel-strong: #fffdf8;
-    --panel-tint: #f6ecdd;
-    --ink: #201a14;
-    --muted: #65594d;
-    --line: rgba(100, 78, 53, 0.16);
-    --line-strong: rgba(100, 78, 53, 0.28);
-    --accent: #b85c2f;
-    --accent-strong: #8f431d;
-    --accent-soft: rgba(184, 92, 47, 0.12);
-    --success: #2f6a49;
-    --danger: #9b3c2d;
-    --shadow: 0 24px 60px rgba(49, 31, 12, 0.08);
+    color-scheme: dark;
+    --bg: #0c0f14;
+    --bg-top: #0b0d12;
+    --panel: #12161d;
+    --panel-2: #171c24;
+    --panel-3: #0f1319;
+    --surface: #1b212b;
+    --surface-2: #202735;
+    --line: rgba(255, 255, 255, 0.08);
+    --line-strong: rgba(255, 255, 255, 0.14);
+    --text: #eef2ff;
+    --muted: #9aa4b2;
+    --dim: #7f8997;
+    --accent: #4f8cff;
+    --accent-soft: rgba(79, 140, 255, 0.16);
+    --success: #4ade80;
+    --danger: #f87171;
+    --shadow: 0 28px 90px rgba(0, 0, 0, 0.42);
   }
 
   * {
     box-sizing: border-box;
   }
 
-  html {
-    background: var(--bg);
-  }
-
+  html,
   body {
     margin: 0;
-    min-height: 100vh;
-    font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+    min-height: 100%;
     background:
-      radial-gradient(circle at top left, rgba(184, 92, 47, 0.18), transparent 24%),
-      radial-gradient(circle at right top, rgba(64, 108, 97, 0.12), transparent 28%),
-      linear-gradient(180deg, #f8f1e7 0%, var(--bg) 34%, var(--bg-strong) 100%);
-    color: var(--ink);
+      radial-gradient(circle at top left, rgba(79, 140, 255, 0.12), transparent 24%),
+      radial-gradient(circle at top right, rgba(45, 212, 191, 0.08), transparent 20%),
+      linear-gradient(180deg, #0a0c11 0%, #0c0f14 100%);
+    color: var(--text);
+    font-family: Inter, "Segoe UI", sans-serif;
   }
 
-  .app-shell {
-    min-height: 100vh;
-    padding: 32px 24px 40px;
-  }
-
-  .shell-frame {
-    width: min(1480px, 100%);
-    margin: 0 auto;
-    display: grid;
-    gap: 20px;
-  }
-
-  .topbar {
-    display: grid;
-    grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.95fr);
-    gap: 18px;
-    padding: 24px;
-    border: 1px solid var(--line);
-    border-radius: 28px;
-    background:
-      linear-gradient(145deg, rgba(255, 252, 247, 0.92), rgba(244, 236, 224, 0.88)),
-      rgba(255, 255, 255, 0.72);
-    box-shadow: var(--shadow);
-    backdrop-filter: blur(18px);
-  }
-
-  .topbar h1,
-  .panel h2,
-  .card h3 {
-    margin: 0;
-    font-family: "Space Grotesk", "Avenir Next Condensed", sans-serif;
-    letter-spacing: -0.03em;
-  }
-
-  .topbar p,
-  .card p,
-  .meta,
-  li,
-  .pill {
-    margin: 0;
-    color: var(--muted);
-  }
-
-  .topbar-copy {
-    display: grid;
-    gap: 14px;
-  }
-
-  .topbar-copy h1 {
-    font-size: clamp(34px, 4vw, 52px);
-    line-height: 0.94;
-    max-width: 12ch;
-  }
-
-  .topbar-summary {
-    max-width: 62ch;
-    line-height: 1.6;
-    font-size: 15px;
-  }
-
-  .hero-meta {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-
-  .hero-stat {
-    min-width: 150px;
-    padding: 12px 14px;
-    border-radius: 18px;
-    border: 1px solid rgba(100, 78, 53, 0.12);
-    background: rgba(255, 255, 255, 0.58);
-  }
-
-  .hero-stat strong {
-    display: block;
-    color: var(--ink);
-    font-size: 20px;
-    line-height: 1.1;
-    margin-top: 4px;
-  }
-
-  .topbar-side {
-    display: grid;
-    gap: 14px;
-    align-content: start;
-  }
-
-  .topbar-status {
-    display: grid;
-    gap: 10px;
-    padding: 18px;
-    border-radius: 22px;
-    border: 1px solid rgba(184, 92, 47, 0.16);
-    background: linear-gradient(180deg, rgba(184, 92, 47, 0.12), rgba(255, 253, 248, 0.96));
-  }
-
-  .topbar-status strong {
-    color: var(--ink);
-    font-size: 16px;
-  }
-
-  .layout {
-    display: grid;
-    grid-template-columns: minmax(240px, 0.72fr) minmax(440px, 1.24fr) minmax(360px, 1fr);
-    gap: 20px;
-  }
-
-  .panel {
-    border: 1px solid var(--line);
-    border-radius: 26px;
-    background: var(--panel);
-    padding: 20px;
-    box-shadow: var(--shadow);
-    backdrop-filter: blur(16px);
-  }
-
-  .stack {
-    display: grid;
-    gap: 16px;
-  }
-
-  .panel-head {
-    display: grid;
-    gap: 6px;
-  }
-
-  .panel-head p,
-  .panel-head h2 {
-    margin: 0;
-  }
-
-  .card {
-    padding: 16px;
-    border-radius: 20px;
-    background: var(--panel-strong);
-    border: 1px solid rgba(100, 78, 53, 0.12);
-  }
-
-  .accent-card {
-    background: linear-gradient(180deg, rgba(184, 92, 47, 0.1), rgba(255, 253, 248, 0.96));
-  }
-
-  .eyebrow {
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    color: var(--accent);
-    font-weight: 600;
-  }
-
-  .pill-row {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .pill {
-    display: inline-flex;
-    padding: 6px 10px;
-    border: 1px solid rgba(100, 78, 53, 0.14);
-    border-radius: 999px;
-    background: rgba(246, 236, 221, 0.72);
-    font-size: 13px;
-  }
-
-  .status {
-    color: var(--success);
-  }
-
-  ul {
-    margin: 0;
-    padding-left: 18px;
-  }
-
-  .message-list,
-  .option-list {
-    display: grid;
-    gap: 12px;
-    padding: 0;
-    list-style: none;
-  }
-
-  .message-role {
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--accent);
-    margin-bottom: 6px;
-  }
-
-  .empty-state {
-    padding: 16px;
-    border-radius: 18px;
-    border: 1px dashed var(--line-strong);
-    color: var(--muted);
-    background: rgba(255, 251, 245, 0.58);
-  }
-
-  .selected-item {
-    padding: 10px;
-    border-radius: 16px;
-    background: rgba(184, 92, 47, 0.08);
-    border: 1px solid rgba(184, 92, 47, 0.18);
-  }
-
-  .editor-block-button {
-    width: 100%;
-    border: 0;
-    padding: 0;
-    background: transparent;
-    text-align: left;
+  a {
     color: inherit;
-    display: grid;
-    gap: 4px;
-    cursor: pointer;
-    font: inherit;
+    text-decoration: none;
   }
 
   button,
   input,
   textarea,
   select {
-    transition:
-      border-color 160ms ease,
-      background-color 160ms ease,
-      box-shadow 160ms ease,
-      transform 160ms ease;
+    font: inherit;
   }
 
-  .editor-form {
+  .app-shell {
+    min-height: 100vh;
+    padding: 14px;
+  }
+
+  .workspace-shell {
+    min-height: calc(100vh - 28px);
     display: grid;
+    grid-template-rows: auto 1fr;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    overflow: hidden;
+    background: rgba(10, 12, 17, 0.9);
+    box-shadow: var(--shadow);
+  }
+
+  .workspace-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(18, 21, 28, 0.96);
+  }
+
+  .workspace-topbar,
+  .topbar-left,
+  .topbar-right,
+  .topbar-actions,
+  .topbar-crumbs {
+    display: flex;
+    align-items: center;
     gap: 12px;
+  }
+
+  .brand-mark,
+  .toolbar-chip,
+  .avatar {
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+
+  .brand-mark {
+    font-style: italic;
+    font-weight: 800;
+  }
+
+  .topbar-title {
+    color: var(--text);
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+
+  .crumb-muted,
+  .workspace-topbar p,
+  .meta,
+  li {
+    color: var(--muted);
+  }
+
+  .topbar-button {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text);
+    padding: 8px 12px;
+    cursor: pointer;
+  }
+
+  .topbar-button-primary {
+    background: #f6f7fb;
+    color: #111827;
+    font-weight: 600;
+  }
+
+  .workspace-content {
+    display: grid;
+    grid-template-columns: 320px 250px minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .eyebrow {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #7ab8ff;
+    font-weight: 600;
+  }
+
+  .workspace-rail,
+  .file-rail {
+    display: grid;
+    grid-template-rows: 1fr;
+    border-right: 1px solid var(--line);
+    background: rgba(16, 19, 25, 0.94);
+    min-height: 0;
+  }
+
+  .workspace-rail {
+    padding: 18px 16px 16px;
+  }
+
+  .rail-scroll,
+  .file-tree,
+  .code-scroll,
+  .terminal-body {
+    overflow: auto;
+  }
+
+  .rail-scroll {
+    padding-right: 4px;
+  }
+
+  .rail-scroll h1,
+  .panel-title,
+  .card h3,
+  .preview-pane h2,
+  .diff-pane h2 {
+    margin: 0;
+    font-family: "Space Grotesk", "Segoe UI", sans-serif;
+    letter-spacing: -0.04em;
+  }
+
+  .rail-scroll h1 {
+    font-size: 1.04rem;
+    line-height: 1.75;
+    font-weight: 600;
+    margin-bottom: 16px;
+  }
+
+  .rail-scroll p,
+  .rail-scroll li,
+  .card p {
+    line-height: 1.7;
+    font-size: 0.93rem;
+  }
+
+  .rail-scroll ul,
+  .message-list,
+  .option-list {
+    margin: 10px 0 18px;
+    padding-left: 18px;
+  }
+
+  .message-list,
+  .option-list {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    gap: 10px;
+  }
+
+  .message-list li,
+  .option-list li {
+    margin: 0;
+  }
+
+  .message-role {
+    margin-bottom: 6px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #7ab8ff;
+  }
+
+  .task-card,
+  .prompt-box,
+  .card,
+  .empty-state {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--panel);
+  }
+
+  .task-card,
+  .prompt-box,
+  .card {
+    padding: 14px;
+  }
+
+  .task-card {
+    margin-top: 18px;
+    background: linear-gradient(180deg, #1d2330 0%, #151920 100%);
+  }
+
+  .task-card .label {
+    display: block;
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .task-card .meta {
+    display: block;
+    margin-top: 6px;
+    font-size: 0.82rem;
+    color: var(--dim);
+  }
+
+  .prompt-box {
+    margin-top: 16px;
+    background: #12161d;
+  }
+
+  .prompt-input {
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--dim);
+  }
+
+  .prompt-input input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    outline: none;
+  }
+
+  .send-button,
+  .submit-button,
+  .approval-button,
+  .session-button {
+    border: none;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+
+  .send-button {
+    margin-left: auto;
+    width: 28px;
+    height: 28px;
+    background: var(--accent);
+    color: white;
+  }
+
+  .prompt-footer,
+  .pill-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    margin-top: 12px;
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .file-rail {
+    grid-template-rows: auto 1fr;
+  }
+
+  .file-topbar,
+  .editor-topbar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(18, 21, 28, 0.96);
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+
+  .file-topbar strong,
+  .editor-topbar strong {
+    color: var(--text);
+  }
+
+  .file-tree {
+    padding: 12px 10px 16px;
+  }
+
+  .file-item,
+  .editor-block-button,
+  .timeline-action-button,
+  .preview-block,
+  .session-button {
+    width: 100%;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    padding: 9px 10px;
+  }
+
+  .file-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 0.92rem;
+  }
+
+  .file-item-active,
+  .selected-item,
+  .preview-block-active {
+    background: var(--accent-soft);
+    border-color: rgba(79, 140, 255, 0.28);
+    color: #dce8ff;
+  }
+
+  .editor-shell {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    min-height: 0;
+    background: var(--panel-3);
+  }
+
+  .editor-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+    min-height: 0;
+  }
+
+  .editor-pane {
+    border-right: 1px solid var(--line);
+    min-height: 0;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .preview-pane {
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    background: #11161d;
+  }
+
+  .preview-pane-header,
+  .diff-pane-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(18, 21, 28, 0.96);
+  }
+
+  .preview-pane-header p,
+  .diff-pane-header p {
+    margin: 0 0 6px;
+  }
+
+  .preview-pane-header h2,
+  .diff-pane-header h2 {
+    font-size: 1rem;
+  }
+
+  .code-view {
+    display: grid;
+    grid-template-columns: 56px minmax(0, 1fr);
+    min-height: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.9rem;
+    line-height: 1.8;
+  }
+
+  .line-numbers,
+  .code-lines {
+    margin: 0;
+    padding: 16px 0;
+    list-style: none;
+  }
+
+  .line-numbers {
+    text-align: right;
+    padding-right: 14px;
+    color: #5f6b7b;
+    border-right: 1px solid var(--line);
+    background: #11141b;
+  }
+
+  .code-lines {
+    padding-left: 18px;
+    padding-right: 18px;
+    color: #d7deea;
+  }
+
+  .code-line {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .browser-frame {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
+    padding: 14px;
+    gap: 12px;
+  }
+
+  .browser-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .browser-dots {
+    display: flex;
+    gap: 8px;
+  }
+
+  .browser-dots span {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: #5f6b7b;
+  }
+
+  .browser-url {
+    flex: 1;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 12px;
+    color: var(--muted);
+    background: #161c25;
+    font-size: 0.85rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .preview-frame {
+    width: 100%;
+    height: 100%;
+    min-height: 320px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: white;
+  }
+
+  .preview-controls {
+    display: grid;
+    gap: 10px;
+    padding: 0 14px 14px;
+  }
+
+  .preview-stack {
+    display: grid;
+    gap: 8px;
+  }
+
+  .preview-block {
+    display: grid;
+    gap: 4px;
+    border-color: var(--line);
+    background: #161c25;
+  }
+
+  .preview-block-label {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .preview-block-path {
+    color: var(--dim);
+    font-size: 0.82rem;
+  }
+
+  .diff-pane {
+    border-top: 1px solid var(--line);
+    background: #12161d;
+    min-height: 0;
+  }
+
+  .diff-pane-body {
+    padding: 14px;
+    max-height: 260px;
+    overflow: auto;
+  }
+
+  .empty-state {
+    padding: 16px;
+    color: var(--muted);
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .dark-empty {
+    background: #151920;
   }
 
   .field {
     display: grid;
     gap: 6px;
-    color: var(--ink);
+    color: var(--text);
   }
 
   .field input,
   .field textarea,
-  .field select {
+  .field select,
+  .approval-reason-input {
     width: 100%;
-    border: 1px solid rgba(100, 78, 53, 0.18);
-    border-radius: 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
     padding: 10px 12px;
-    background: rgba(255, 255, 255, 0.82);
-    font: inherit;
-    color: var(--ink);
+    background: #11161d;
+    color: var(--text);
   }
 
-  .field input:focus,
-  .field textarea:focus,
-  .field select:focus,
-  .editor-block-button:focus-visible,
-  .timeline-action-button:focus-visible,
-  .preview-block:focus-visible,
-  .approval-button:focus-visible,
-  .submit-button:focus-visible {
-    outline: none;
-    border-color: rgba(184, 92, 47, 0.44);
-    box-shadow: 0 0 0 4px rgba(184, 92, 47, 0.12);
+  .editor-form,
+  .subgrid,
+  .section-card,
+  .stack {
+    display: grid;
+    gap: 12px;
+  }
+
+  .subgrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .submit-button {
-    border: 0;
-    border-radius: 999px;
-    padding: 12px 16px;
-    background: linear-gradient(135deg, var(--accent), var(--accent-strong));
-    color: #fffdf8;
-    font: inherit;
-    cursor: pointer;
-    font-weight: 600;
     justify-self: start;
-  }
-
-  .submit-button:hover,
-  .approval-button:hover,
-  .preview-block:hover {
-    transform: translateY(-1px);
-  }
-
-  .preview-surface {
-    display: grid;
-    gap: 12px;
-    min-height: 100%;
-  }
-
-  .preview-stack {
-    display: grid;
-    gap: 10px;
-  }
-
-  .preview-block {
-    border: 1px solid rgba(100, 78, 53, 0.14);
-    border-radius: 18px;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 236, 221, 0.72));
-    padding: 14px;
-    text-align: left;
-    cursor: pointer;
-    display: grid;
-    gap: 6px;
-    font: inherit;
-    color: inherit;
-  }
-
-  .preview-block-active {
-    border-color: rgba(184, 92, 47, 0.38);
-    background: linear-gradient(180deg, rgba(255, 237, 215, 0.96), rgba(255, 253, 248, 0.98));
-    box-shadow: inset 0 0 0 1px rgba(184, 92, 47, 0.12);
-  }
-
-  .preview-block-label {
-    font-family: "Space Grotesk", "Avenir Next Condensed", sans-serif;
-    color: var(--ink);
-  }
-
-  .preview-block-path {
-    color: var(--muted);
-    font-size: 13px;
-  }
-
-  .preview-detail {
-    background: rgba(255, 251, 245, 0.74);
-  }
-
-  .preview-frame {
-    width: 100%;
-    min-height: 360px;
-    border: 1px solid rgba(100, 78, 53, 0.12);
-    border-radius: 18px;
-    background: #fffdf8;
-  }
-
-  .timeline-action-button {
-    width: 100%;
-    border: 0;
-    padding: 0;
-    background: transparent;
-    text-align: left;
-    color: inherit;
-    display: grid;
-    gap: 4px;
-    cursor: pointer;
-    font: inherit;
-  }
-
-  .diff-header {
-    background: linear-gradient(180deg, rgba(255, 229, 200, 0.9), rgba(255, 253, 248, 0.96));
-  }
-
-  .approval-card {
-    background: linear-gradient(180deg, rgba(184, 92, 47, 0.12), rgba(255, 253, 248, 0.96));
-    border-color: rgba(184, 92, 47, 0.22);
-  }
-
-  .approval-success-card {
-    background: linear-gradient(180deg, rgba(47, 106, 73, 0.14), rgba(255, 253, 248, 0.96));
-    border-color: rgba(47, 106, 73, 0.24);
-  }
-
-  .approval-reject-card {
-    background: linear-gradient(180deg, rgba(155, 60, 45, 0.12), rgba(255, 253, 248, 0.96));
-    border-color: rgba(155, 60, 45, 0.22);
+    padding: 11px 16px;
+    background: var(--accent);
+    color: white;
   }
 
   .approval-actions {
     display: flex;
     gap: 10px;
-    margin-top: 12px;
     flex-wrap: wrap;
-  }
-
-  .approval-reason-field {
-    display: grid;
-    gap: 8px;
     margin-top: 12px;
-    color: var(--ink);
-    font-size: 14px;
-  }
-
-  .approval-reason-input {
-    width: 100%;
-    min-height: 88px;
-    border-radius: 16px;
-    border: 1px solid rgba(155, 60, 45, 0.18);
-    background: rgba(255, 255, 255, 0.88);
-    padding: 12px 14px;
-    font: inherit;
-    color: inherit;
-    resize: vertical;
-  }
-
-  .approval-reason-input:focus {
-    outline: none;
-    border-color: rgba(184, 92, 47, 0.44);
-    box-shadow: 0 0 0 4px rgba(184, 92, 47, 0.12);
-  }
-
-  .approval-button {
-    border: 0;
-    border-radius: 999px;
-    padding: 10px 14px;
-    font: inherit;
-    cursor: pointer;
   }
 
   .approve-button {
-    background: var(--success);
-    color: #fffdf8;
+    padding: 10px 14px;
+    background: #14532d;
+    color: white;
   }
 
   .reject-button {
-    background: var(--danger);
-    color: #fffdf8;
+    padding: 10px 14px;
+    background: #7f1d1d;
+    color: white;
   }
 
-  .code-block pre {
-    margin: 0;
-    overflow: auto;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-family: "SFMono-Regular", "Menlo", monospace;
-    font-size: 13px;
-    line-height: 1.5;
-    color: var(--ink);
+  .approval-card,
+  .approval-success-card,
+  .approval-reject-card,
+  .accent-card,
+  .preview-detail,
+  .diff-header {
+    background: #151a23;
   }
 
-  .subgrid {
+  .terminal {
     display: grid;
-    gap: 14px;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto 1fr;
+    min-height: 188px;
+    border-top: 1px solid var(--line);
+    background: #11141b;
   }
 
-  .rail-grid,
-  .summary-grid,
-  .workbench-grid {
-    display: grid;
-    gap: 14px;
-  }
-
-  .summary-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .workbench-grid {
-    grid-template-columns: minmax(0, 0.86fr) minmax(0, 1.14fr);
-    align-items: start;
-  }
-
-  .workbench-grid .preview-card,
-  .workbench-grid .diff-card {
-    grid-column: 2;
-  }
-
-  .workbench-grid .diff-card {
-    align-self: stretch;
-  }
-
-  .section-card {
-    display: grid;
-    gap: 12px;
-  }
-
-  .section-title {
+  .terminal-tabs {
     display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.88rem;
   }
 
-  .section-title h3,
-  .section-title p {
+  .terminal-tab {
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .terminal-tab.active {
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .terminal-body {
+    padding: 14px 16px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.86rem;
+    line-height: 1.65;
+    color: #b9c4d0;
+  }
+
+  .terminal-body p {
     margin: 0;
   }
 
-  .info-pair {
-    display: grid;
-    gap: 4px;
+  .terminal-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 8px;
+    border-radius: 999px;
+    background: var(--success);
   }
 
-  .info-pair strong {
-    color: var(--ink);
-  }
-
-  .muted-note {
-    font-size: 13px;
-    color: var(--muted);
+  .terminal-accent {
+    color: #7ab8ff;
   }
 
   @media (max-width: 1120px) {
-    .topbar,
-    .layout {
+    .workspace-content,
+    .editor-split {
       grid-template-columns: 1fr;
     }
 
-    .summary-grid,
-    .workbench-grid,
     .subgrid {
       grid-template-columns: 1fr;
-    }
-
-    .workbench-grid .preview-card,
-    .workbench-grid .diff-card {
-      grid-column: auto;
     }
   }
 
   @media (max-width: 720px) {
     .app-shell {
-      padding: 18px 14px 28px;
+      padding: 0;
     }
 
-    .panel,
-    .topbar {
-      padding: 16px;
-      border-radius: 22px;
+    .workspace-shell {
+      min-height: 100vh;
+      border-radius: 0;
     }
 
-    .topbar-copy h1 {
-      font-size: 30px;
-    }
-
-    .hero-stat {
-      min-width: 0;
-      flex: 1 1 120px;
+    .workspace-topbar {
+      flex-wrap: wrap;
     }
   }
 `;
@@ -1208,294 +1413,167 @@ export const webAppStyles = `
 export function renderWebAppBody(input: WebAppBootstrap): string {
   const shell = createWebAppShell(input);
   const { workbench } = shell;
-  const uniqueFiles = [...new Set([...workbench.files, ...(workbench.selectedBlockFile ? [workbench.selectedBlockFile] : [])])];
-  const activePreview = workbench.previews[workbench.previews.length - 1];
+  const uniqueFiles = [
+    ...new Set([
+      "src",
+      ...(workbench.files.length > 0 ? workbench.files : ["src/App.tsx", "src/index.css", "main.tsx"]),
+      ...(workbench.selectedBlockFile ? [workbench.selectedBlockFile] : []),
+    ]),
+  ];
+  const activeFile =
+    workbench.selectedDiffAction?.action.path ?? workbench.selectedBlockFile ?? uniqueFiles[0] ?? "src/App.tsx";
+  const currentMessage = workbench.chatMessages[workbench.chatMessages.length - 1];
 
   return `
     <main class="app-shell">
-      <div class="shell-frame">
-        <header class="topbar">
-          <div class="topbar-copy">
-            <div>
-              <p class="eyebrow">AI IDE Workbench</p>
-              <h1>${escapeHtml(shell.topBar.projectName)}</h1>
-            </div>
-            <p class="topbar-summary">
-              Protocol events, patch review, and block-scoped page editing are now grouped into a clearer operator surface instead of flat cards.
-            </p>
-            <div class="hero-meta">
-              <div class="hero-stat">
-                <span class="eyebrow">Runtime</span>
-                <strong>${escapeHtml(shell.topBar.runtimeType)}</strong>
-              </div>
-              <div class="hero-stat">
-                <span class="eyebrow">Actions</span>
-                <strong>${escapeHtml(String(workbench.actions.length))}</strong>
-              </div>
-              <div class="hero-stat">
-                <span class="eyebrow">Preview Ports</span>
-                <strong>${escapeHtml(String(workbench.previews.length))}</strong>
-              </div>
+      <div class="workspace-shell">
+        <header class="workspace-topbar">
+          <div class="topbar-left">
+            <div class="brand-mark">b</div>
+            <div class="avatar">B</div>
+            <div class="topbar-crumbs">
+              <span class="topbar-title">${escapeHtml(shell.topBar.projectName)}</span>
+              <span class="crumb-muted">🔒</span>
             </div>
           </div>
-          <div class="topbar-side">
-            <div class="topbar-status">
-              <p class="eyebrow">Current Focus</p>
-              <strong>${escapeHtml(workbench.selectedBlock?.label ?? "No block selected")}</strong>
-              <p>${escapeHtml(workbench.selectedBlock?.selector ?? "Select a block to inspect the current editing context.")}</p>
+          <div class="topbar-right">
+            <div class="topbar-actions">
+              <span class="toolbar-chip">👁</span>
+              <span class="toolbar-chip">&lt;/&gt;</span>
+              <span class="toolbar-chip">▤</span>
             </div>
-            <div class="card">
-              <p class="eyebrow">Workspace Panels</p>
-              <div class="pill-row">
-                ${shell.centerPanels
-                  .concat(shell.rightPanels)
-                  .map((panel) => `<span class="pill">${escapeHtml(workspacePanelLabels[panel])}</span>`)
-                  .join("")}
-              </div>
-            </div>
+            <button class="topbar-button" data-open-dialog="sessions" type="button">Sessions</button>
+            <button class="topbar-button" data-open-dialog="share" type="button">Share</button>
+            <button class="topbar-button topbar-button-primary" data-open-dialog="publish" type="button">Publish</button>
+            <div class="avatar">B</div>
           </div>
         </header>
 
-        <section class="layout">
-          <aside class="panel stack">
-            <div class="panel-head">
-              <p class="eyebrow">Project Rail</p>
-              <h2>Context and Scope</h2>
-            </div>
-            <div class="rail-grid">
-              <div class="card section-card">
-                <div class="info-pair">
-                  <span class="eyebrow">Project ID</span>
-                  <strong>${escapeHtml(input.projectId)}</strong>
-                </div>
-                <p class="muted-note">Monorepo session state and runtime outputs are anchored to this project scope.</p>
+        <section class="workspace-content">
+          <aside class="workspace-rail">
+            <div class="rail-scroll">
+              <h1>${escapeHtml(currentMessage?.content ?? "This session is ready to show messages, code, preview, and runtime state.")}</h1>
+              <p><strong>主要功能：</strong></p>
+              <ul>
+                <li>顶部导航工作台，支持每个会话独立进入</li>
+                <li>文件树、代码区、终端和预览同时可见</li>
+                <li>补丁、审批、区块编辑都保留在会话上下文里</li>
+                <li>浏览器 runtime 预览以内嵌 iframe 方式直接显示</li>
+              </ul>
+              <p><strong>当前计划：</strong></p>
+              <ul>
+                ${workbench.plan
+                  .map((step) => `<li><strong>${escapeHtml(step.title)}</strong>，${escapeHtml(step.description ?? "No description")}</li>`)
+                  .join("")}
+              </ul>
+
+              <div class="task-card">
+                <span class="label">${escapeHtml(shell.topBar.projectName)}</span>
+                <span class="meta">${escapeHtml(input.sessionId)}</span>
               </div>
-              <div class="card section-card">
-                <div class="info-pair">
-                  <span class="eyebrow">Session ID</span>
-                  <strong>${escapeHtml(input.sessionId)}</strong>
+
+              <div class="prompt-box">
+                <div class="meta">How can Bolt help you today? (or /command)</div>
+                <div class="prompt-input">
+                  <span>+</span>
+                  <input
+                    data-command-input
+                    value="${escapeHtml(input.composerText ?? "")}"
+                    placeholder="Ask Bolt to refine layout, preview, or patch flow"
+                  />
+                  <span>${escapeHtml(shell.topBar.runtimeType)}</span>
+                  <button class="send-button" data-send-message type="button" aria-label="Send">↑</button>
                 </div>
-                <p class="muted-note">Interactive web edits, approvals, and generated patches all resolve under this session.</p>
-              </div>
-              <div class="card section-card">
-                <div class="info-pair">
-                  <span class="eyebrow">Panel Groups</span>
-                  <strong>${escapeHtml(`${shell.centerPanels.length} center / ${shell.rightPanels.length} workbench`)}</strong>
+                <div class="prompt-footer">
+                  <span>${escapeHtml(String(workbench.actions.length))} actions</span>
+                  <span>${escapeHtml(String(workbench.previews.length))} previews</span>
                 </div>
-                <p class="muted-note">Center keeps decision flow; right side stays dedicated to assets, preview, and diff review.</p>
               </div>
+
               <div class="card section-card">
-                <p class="eyebrow">Tracked Files</p>
-                <ul class="message-list">
-                  ${uniqueFiles.length > 0
-                    ? uniqueFiles
-                        .map(
-                          (file) => `
-                            <li class="${file === workbench.selectedBlockFile ? "selected-item" : ""}">
-                              ${escapeHtml(file)}
-                            </li>
-                          `,
-                        )
-                        .join("")
-                    : `<li class="empty-state">No files tracked yet</li>`}
-                </ul>
+                <p class="eyebrow">Interactive Web Editor</p>
+                ${renderWebEditor(workbench.webEditor)}
               </div>
             </div>
           </aside>
 
-          <section class="panel stack">
-            <div class="panel-head">
-              <p class="eyebrow">Operator Flow</p>
-              <h2>Conversation, Planning, Edits</h2>
+          <aside class="file-rail">
+            <div class="file-topbar">
+              <strong>Files</strong>
+              <span>Search</span>
             </div>
-            <div class="summary-grid">
-              <div class="card section-card">
-                <span class="eyebrow">Messages</span>
-                <h3>${escapeHtml(String(workbench.chatMessages.length))}</h3>
-                <p>Latest protocol-backed conversation state.</p>
-              </div>
-              <div class="card section-card">
-                <span class="eyebrow">Plan Steps</span>
-                <h3>${escapeHtml(String(workbench.plan.length))}</h3>
-                <p>Execution steps with status and approval markers.</p>
-              </div>
-              <div class="card section-card">
-                <span class="eyebrow">Patch Actions</span>
-                <h3>${escapeHtml(String(workbench.patchActions.length))}</h3>
-                <p>Generated diffs ready for review and replacement.</p>
-              </div>
+            <div class="file-tree">
+              ${uniqueFiles
+                .map(
+                  (file) => `
+                    <div class="file-item ${file === activeFile ? "file-item-active" : ""}">
+                      <span>${escapeHtml(file === "src" ? "⌄" : "▸")}</span>
+                      <span>${escapeHtml(file)}</span>
+                    </div>
+                  `,
+                )
+                .join("")}
             </div>
-            <section class="card section-card">
-              <div class="section-title">
-                <div>
-                  <p class="eyebrow">ChatPanel</p>
-                  <h3>Recent Messages</h3>
+          </aside>
+
+          <section class="editor-shell">
+            <div class="editor-topbar">
+              <span>${escapeHtml(activeFile.replace(/\//g, " > "))}</span>
+              <strong>${escapeHtml(workbench.selectedBlock?.label ?? "Workspace Block")}</strong>
+            </div>
+
+            <div class="editor-split">
+              <div class="editor-pane">
+                ${renderEditorCode(workbench)}
+              </div>
+
+              <div class="preview-pane">
+                <div class="preview-pane-header">
+                  <p class="eyebrow">Preview</p>
+                  <h2>Embedded browser runtime</h2>
                 </div>
-              </div>
-              <ul class="message-list">
-                ${workbench.chatMessages.length > 0
-                  ? workbench.chatMessages
+                ${renderSessionPreview(workbench)}
+                <div class="preview-controls">
+                  <div class="preview-stack">
+                    ${workbench.webEditor.blocks
                       .map(
-                        (message) => `
-                          <li class="card">
-                            <div class="message-role">${escapeHtml(message.role)}</div>
-                            <div>${escapeHtml(message.content)}</div>
-                          </li>
+                        (block) => `
+                          <button
+                            type="button"
+                            class="preview-block ${block.id === workbench.webEditor.selectedBlockId ? "preview-block-active" : ""}"
+                            data-preview-block-id="${escapeHtml(block.id)}"
+                          >
+                            <span class="preview-block-label">${escapeHtml(block.label)}</span>
+                            <span class="preview-block-path">${escapeHtml(block.selector)}</span>
+                          </button>
                         `,
                       )
-                      .join("")
-                  : `<li class="empty-state">No chat messages yet</li>`}
-              </ul>
-            </section>
-
-            <section class="card section-card">
-              <div class="section-title">
-                <div>
-                  <p class="eyebrow">PlanPanel</p>
-                  <h3>Execution Plan</h3>
+                      .join("")}
+                  </div>
                 </div>
               </div>
-              <ul class="message-list">
-                ${workbench.plan.length > 0
-                  ? workbench.plan
-                      .map(
-                        (step) => `
-                          <li class="card">
-                            <div class="pill-row">
-                              <span class="pill">${escapeHtml(renderPlanStatus(step.status))}</span>
-                              ${step.requiresApproval ? `<span class="pill">approval</span>` : ""}
-                            </div>
-                            <h3>${escapeHtml(step.title)}</h3>
-                            <p>${escapeHtml(step.description ?? "No description")}</p>
-                          </li>
-                        `,
-                      )
-                      .join("")
-                  : `<li class="empty-state">No plan steps yet</li>`}
-              </ul>
-            </section>
-
-            <section class="section-card">
-              <div class="section-title">
-                <div>
-                  <p class="eyebrow">InteractionPanel</p>
-                  <h3>Pending Decision</h3>
-                </div>
-              </div>
-              ${renderPendingInteraction(workbench.pendingInteraction)}
-            </section>
-
-            <section class="section-card">
-              ${renderWebEditor(workbench.webEditor)}
-            </section>
-
-            <section class="card section-card">
-              <div class="section-title">
-                <div>
-                  <p class="eyebrow">ActionTimeline</p>
-                  <h3>Execution History</h3>
-                </div>
-              </div>
-              <ul class="message-list">
-                ${workbench.actions.length > 0
-                  ? workbench.actions
-                      .map(
-                        (action) => `
-                          <li class="card ${action.id === workbench.selectedDiffAction?.id ? "selected-item" : ""}">
-                            <div class="pill-row">
-                              <span class="pill">${escapeHtml(action.source)}</span>
-                              <span class="pill status">${escapeHtml(action.status)}</span>
-                            </div>
-                            ${
-                              action.action.type === "file.patch"
-                                ? `
-                                  <button
-                                    type="button"
-                                    class="timeline-action-button"
-                                    data-diff-action-id="${escapeHtml(action.id)}"
-                                  >
-                                    <h3>${escapeHtml(action.action.type)}</h3>
-                                    <p>${escapeHtml(summarizeAction(action.action))}</p>
-                                  </button>
-                                `
-                                : `
-                                  <h3>${escapeHtml(action.action.type)}</h3>
-                                  <p>${escapeHtml(summarizeAction(action.action))}</p>
-                                `
-                            }
-                          </li>
-                        `,
-                      )
-                      .join("")
-                  : `<li class="empty-state">No actions recorded</li>`}
-              </ul>
-            </section>
-          </section>
-
-          <section class="panel stack">
-            <div class="panel-head">
-              <p class="eyebrow">Workbench Surface</p>
-              <h2>Preview, Editor, Diff</h2>
             </div>
-            <div class="workbench-grid">
-              <div class="card section-card">
-                <div class="section-title">
-                  <div>
-                    <p class="eyebrow">EditorPanel</p>
-                    <h3>Focused Block</h3>
-                  </div>
-                </div>
-                <p>${escapeHtml(
-                  workbench.selectedBlock
-                    ? `Focused block: ${workbench.selectedBlock.label} -> ${workbench.selectedBlock.selector}`
-                    : "Use this slot for a code editor bound to the active file selection.",
-                )}</p>
+
+            <div class="diff-pane">
+              <div class="diff-pane-header">
+                <p class="eyebrow">Review</p>
+                <h2>Patch review and runtime output</h2>
               </div>
-              <div class="card section-card preview-card">
-                <div class="section-title">
-                  <div>
-                    <p class="eyebrow">PreviewPanel</p>
-                    <h3>Live Surface</h3>
-                  </div>
+              <div class="diff-pane-body">
+                <div class="stack">
+                  ${renderDiffPanel(workbench)}
                 </div>
-                ${
-                  workbench.previews.length > 0
-                    ? `
-                      <ul class="message-list">
-                        ${workbench.previews
-                          .map(
-                            (preview) => `
-                              <li class="card">
-                                <strong>${escapeHtml(preview.url)}</strong>
-                                <p>Port ${escapeHtml(String(preview.port))}</p>
-                              </li>
-                            `,
-                          )
-                          .join("")}
-                      </ul>
-                      ${renderPreviewSelection(workbench.webEditor, activePreview?.url)}
-                    `
-                    : `<div class="empty-state">No live preview yet</div>`
-                }
               </div>
-              <div class="card section-card">
-                <div class="section-title">
-                  <div>
-                    <p class="eyebrow">TerminalPanel</p>
-                    <h3>Runtime Output</h3>
-                  </div>
-                </div>
-                <p>Runtime command output will stream into this panel once the browser runtime is real.</p>
+            </div>
+
+            <div class="terminal">
+              <div class="terminal-tabs">
+                <span class="terminal-tab active">Bolt</span>
+                <span class="terminal-tab">Publish Output</span>
+                <span class="terminal-tab">Terminal</span>
+                <span>+</span>
               </div>
-              <div class="card section-card diff-card">
-                <div class="section-title">
-                  <div>
-                    <p class="eyebrow">DiffPanel</p>
-                    <h3>Patch Review</h3>
-                  </div>
-                </div>
-                ${renderDiffPanel(workbench)}
-              </div>
+              <div class="terminal-body">${renderSessionTerminal(workbench)}</div>
             </div>
           </section>
         </section>

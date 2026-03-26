@@ -24,6 +24,30 @@ function renderRuntimePreviewDocument(input: {
 }): string {
   const latestFile = input.files.at(-1);
   const latestContent = latestFile?.content ?? "No file content has been written into the browser container yet.";
+  const clubNames = [...latestContent.matchAll(/name:\s*['"]([^'"]+)['"]/g)]
+    .map((match) => match[1])
+    .filter((name): name is string => Boolean(name))
+    .slice(0, 4);
+  const previewCards =
+    clubNames.length > 0
+      ? clubNames
+          .map(
+            (name, index) => `
+              <article class="preview-card">
+                <span class="badge">0${String(index + 1)}</span>
+                <strong>${escapeHtml(name)}</strong>
+                <p>Generated from the current virtual file system payload.</p>
+              </article>
+            `,
+          )
+          .join("")
+      : `
+        <article class="preview-card">
+          <span class="badge">01</span>
+          <strong>Runtime Preview</strong>
+          <p>Write or patch a file and the preview surface updates immediately.</p>
+        </article>
+      `;
 
   return `<!doctype html>
 <html lang="en">
@@ -33,13 +57,14 @@ function renderRuntimePreviewDocument(input: {
     <title>Browser Runtime Preview</title>
     <style>
       :root {
-        color-scheme: light;
-        --bg: #f7f1e8;
-        --panel: rgba(255, 253, 248, 0.92);
-        --ink: #1f1a15;
-        --muted: #6b5d4f;
-        --line: rgba(98, 77, 52, 0.16);
-        --accent: #bb6138;
+        color-scheme: dark;
+        --bg: #0c0f14;
+        --panel: rgba(19, 23, 30, 0.94);
+        --panel-soft: rgba(25, 30, 40, 0.96);
+        --ink: #eef2ff;
+        --muted: #9aa4b2;
+        --line: rgba(255, 255, 255, 0.08);
+        --accent: #4f8cff;
       }
 
       * {
@@ -49,11 +74,11 @@ function renderRuntimePreviewDocument(input: {
       body {
         margin: 0;
         min-height: 100vh;
-        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        font-family: Inter, "Segoe UI", sans-serif;
         color: var(--ink);
         background:
-          radial-gradient(circle at top left, rgba(187, 97, 56, 0.18), transparent 24%),
-          linear-gradient(180deg, #fcf7f1 0%, var(--bg) 100%);
+          radial-gradient(circle at top left, rgba(79, 140, 255, 0.16), transparent 24%),
+          linear-gradient(180deg, #0a0d12 0%, var(--bg) 100%);
       }
 
       main {
@@ -64,8 +89,8 @@ function renderRuntimePreviewDocument(input: {
       }
 
       section {
-        padding: 20px;
-        border-radius: 22px;
+        padding: 18px;
+        border-radius: 20px;
         border: 1px solid var(--line);
         background: var(--panel);
       }
@@ -104,7 +129,7 @@ function renderRuntimePreviewDocument(input: {
         padding: 12px 14px;
         border-radius: 16px;
         border: 1px solid var(--line);
-        background: rgba(255, 255, 255, 0.78);
+        background: var(--panel-soft);
         color: var(--muted);
       }
 
@@ -115,8 +140,8 @@ function renderRuntimePreviewDocument(input: {
         padding: 16px;
         border-radius: 18px;
         border: 1px solid var(--line);
-        background: #fffdf9;
-        font-family: "SFMono-Regular", "Menlo", monospace;
+        background: #0f1319;
+        font-family: ui-monospace, "SFMono-Regular", "Menlo", monospace;
         font-size: 13px;
         line-height: 1.55;
       }
@@ -126,16 +151,107 @@ function renderRuntimePreviewDocument(input: {
         gap: 12px;
       }
 
+      .browser-shell {
+        display: grid;
+        gap: 12px;
+      }
+
+      .browser-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .browser-dots {
+        display: flex;
+        gap: 8px;
+      }
+
+      .browser-dots span {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: #5f6b7b;
+      }
+
+      .browser-url {
+        flex: 1;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        color: var(--muted);
+        font-size: 13px;
+      }
+
       .viewport-frame {
         padding: 18px;
         border-radius: 18px;
         border: 1px solid var(--line);
+        background: linear-gradient(180deg, #151b24, #10141b);
+      }
+
+      .preview-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .preview-card {
+        padding: 16px;
+        border-radius: 18px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .preview-card strong,
+      .preview-card p,
+      .badge {
+        display: block;
+      }
+
+      .preview-card p {
+        margin-top: 8px;
+        color: var(--muted);
+      }
+
+      .badge {
+        margin-bottom: 8px;
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+      }
+
+      .preview-stage {
+        min-height: 220px;
+        margin-top: 16px;
+        border-radius: 18px;
+        border: 1px solid var(--line);
         background:
-          linear-gradient(180deg, rgba(255, 240, 219, 0.92), rgba(255, 253, 248, 0.98));
+          radial-gradient(circle at top left, rgba(79, 140, 255, 0.18), transparent 25%),
+          linear-gradient(180deg, #ffffff 0%, #eef2f8 100%);
+        color: #111827;
+        padding: 20px;
+      }
+
+      .preview-stage h3,
+      .preview-stage p {
+        margin: 0;
+      }
+
+      .preview-stage p {
+        margin-top: 10px;
+        color: #4b5563;
       }
 
       @media (max-width: 720px) {
         .grid {
+          grid-template-columns: 1fr;
+        }
+
+        .preview-grid {
           grid-template-columns: 1fr;
         }
       }
@@ -167,13 +283,34 @@ function renderRuntimePreviewDocument(input: {
             <p class="eyebrow">Surface</p>
             <h2>Rendered payload</h2>
           </div>
-          <div class="viewport-frame">
-            <h3>${escapeHtml(latestFile?.path ?? "No active file")}</h3>
-            <p>${escapeHtml(
-              latestFile
-                ? "Latest runtime artifact mirrored into the preview surface."
-                : "Once an action writes or patches a file, its content appears here.",
-            )}</p>
+          <div class="browser-shell">
+            <div class="browser-bar">
+              <div class="browser-dots">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              <div class="browser-url">browser-runtime://preview:${escapeHtml(String(input.port))}</div>
+            </div>
+            <div class="viewport-frame">
+              <h3>${escapeHtml(latestFile?.path ?? "No active file")}</h3>
+              <p>${escapeHtml(
+                latestFile
+                  ? "Latest runtime artifact mirrored into the preview surface."
+                  : "Once an action writes or patches a file, its content appears here.",
+              )}</p>
+              <div class="preview-grid">
+                ${previewCards}
+              </div>
+              <div class="preview-stage">
+                <p class="eyebrow">App Preview</p>
+                <h3>${escapeHtml(clubNames[0] ?? "Interactive browser preview")}</h3>
+                <p>
+                  This pane is generated from the virtual file system state, giving the session a fast
+                  embedded preview without leaving the workbench.
+                </p>
+              </div>
+            </div>
           </div>
           <pre>${escapeHtml(latestContent)}</pre>
         </section>
