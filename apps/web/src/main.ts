@@ -22,6 +22,7 @@ type UiState = {
   activeFile?: string;
   viewMode: ViewMode;
   previewUrl?: string;
+  previewLoading?: boolean;
   toast?: string;
 };
 
@@ -359,6 +360,24 @@ function normalizePreviewUrl(value: string): string {
   }
 
   return `https://${trimmed}`;
+}
+
+function joinPreviewLocation(originValue: string, pathValue: string): string {
+  const origin = originValue.trim();
+  const path = pathValue.trim();
+
+  if (!origin) {
+    return normalizePreviewUrl(path || "/");
+  }
+
+  const normalizedOrigin = normalizePreviewUrl(origin).replace(/\/+$/, "");
+  const normalizedPath = path
+    ? path.startsWith("/") || path.startsWith("?") || path.startsWith("#")
+      ? path
+      : `/${path}`
+    : "/";
+
+  return `${normalizedOrigin}${normalizedPath}`;
 }
 
 function renderSessionLauncher(): string {
@@ -927,6 +946,11 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
       viewMode: uiState.viewMode,
       ...(uiState.activeFile ? { activeFile: uiState.activeFile } : {}),
       ...(uiState.previewUrl ? { previewUrl: uiState.previewUrl } : {}),
+      ...(typeof uiState.previewLoading === "boolean"
+        ? { previewLoading: uiState.previewLoading }
+        : {}),
+      previewCanGoBack: previewHistory.index > 0,
+      previewCanGoForward: previewHistory.index >= 0 && previewHistory.index < previewHistory.entries.length - 1,
     };
     target.innerHTML = `${renderWebAppBody(renderState)}${renderDialog(state, uiState)}`;
 
@@ -1011,11 +1035,51 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
     }
 
     const previewFrame = target.querySelector<HTMLIFrameElement>("[data-preview-frame]");
-    const previewInput = target.querySelector<HTMLInputElement>("[data-preview-input]");
+    const previewOriginInput = target.querySelector<HTMLInputElement>("[data-preview-origin-input]");
+    const previewPathInput = target.querySelector<HTMLInputElement>("[data-preview-path-input]");
+
+    previewFrame?.addEventListener("load", () => {
+      let nextUrl = previewFrame.src;
+
+      try {
+        nextUrl = previewFrame.contentWindow?.location.href ?? nextUrl;
+      } catch {
+        nextUrl = previewFrame.src;
+      }
+
+      const normalized = normalizePreviewUrl(nextUrl);
+      if (!normalized) {
+        return;
+      }
+
+      const currentEntry = previewHistory.entries[previewHistory.index];
+      if (currentEntry !== normalized) {
+        previewHistory = {
+          entries: [...previewHistory.entries.slice(0, previewHistory.index + 1), normalized],
+          index: previewHistory.index + 1,
+        };
+      }
+
+      const shouldRender =
+        uiState.previewLoading !== false || uiState.previewUrl !== normalized;
+
+      uiState = {
+        ...uiState,
+        previewUrl: normalized,
+        previewLoading: false,
+      };
+
+      if (shouldRender) {
+        render();
+      }
+    });
 
     target.querySelector<HTMLFormElement>("[data-preview-form]")?.addEventListener("submit", (event) => {
       event.preventDefault();
-      const nextUrl = normalizePreviewUrl(previewInput?.value ?? "");
+      const nextUrl = joinPreviewLocation(
+        previewOriginInput?.value ?? "",
+        previewPathInput?.value ?? "",
+      );
 
       if (!nextUrl) {
         return;
@@ -1028,6 +1092,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
       uiState = {
         ...uiState,
         previewUrl: nextUrl,
+        previewLoading: true,
       };
       render();
     });
@@ -1054,6 +1119,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
           uiState = {
             ...uiState,
             ...(nextPreviewUrl ? { previewUrl: nextPreviewUrl } : {}),
+            previewLoading: true,
           };
           render();
           return;
@@ -1072,6 +1138,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
           uiState = {
             ...uiState,
             ...(nextPreviewUrl ? { previewUrl: nextPreviewUrl } : {}),
+            previewLoading: true,
           };
           render();
           return;
@@ -1083,13 +1150,20 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
           }
 
           const currentUrl = previewHistory.entries[previewHistory.index] ?? uiState.previewUrl;
+          uiState = {
+            ...uiState,
+            previewLoading: true,
+          };
           previewFrame.src = currentUrl ?? previewFrame.src;
         }
       });
     }
 
     target.querySelector<HTMLButtonElement>("[data-preview-open]")?.addEventListener("click", () => {
-      const url = previewInput?.value.trim() ?? previewFrame?.src ?? "";
+      const url = joinPreviewLocation(
+        previewOriginInput?.value ?? "",
+        previewPathInput?.value ?? "",
+      );
 
       if (!url) {
         return;

@@ -28,6 +28,9 @@ export interface WebAppBootstrap {
   activeFile?: string;
   viewMode?: ViewMode;
   previewUrl?: string;
+  previewCanGoBack?: boolean;
+  previewCanGoForward?: boolean;
+  previewLoading?: boolean;
 }
 
 export type ViewMode = "preview" | "code" | "diff";
@@ -691,33 +694,74 @@ function renderSessionTerminal(workbench: WorkbenchViewModel): string {
     .join("");
 }
 
-function renderSessionPreview(workbench: WorkbenchViewModel, previewUrl?: string): string {
+function splitPreviewUrl(previewUrl: string): { origin: string; path: string } {
+  try {
+    const parsed = new URL(previewUrl, "http://localhost");
+    const path = `${parsed.pathname}${parsed.search}${parsed.hash}` || "/";
+    const hasExplicitOrigin = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(previewUrl);
+
+    return {
+      origin: hasExplicitOrigin ? parsed.origin : "",
+      path,
+    };
+  } catch {
+    return {
+      origin: "",
+      path: previewUrl,
+    };
+  }
+}
+
+function renderSessionPreview(
+  workbench: WorkbenchViewModel,
+  options: {
+    previewUrl?: string;
+    canGoBack?: boolean;
+    canGoForward?: boolean;
+    loading?: boolean;
+  } = {},
+): string {
   const activePreview = workbench.previews[workbench.previews.length - 1];
-  const resolvedPreviewUrl = previewUrl ?? activePreview?.url;
+  const resolvedPreviewUrl = options.previewUrl ?? activePreview?.url;
 
   if (!resolvedPreviewUrl) {
     return `<div class="empty-state dark-empty">No live preview yet</div>`;
   }
 
+  const location = splitPreviewUrl(resolvedPreviewUrl);
+
   return `
     <div class="browser-frame">
       <div class="browser-toolbar">
         <div class="browser-actions">
-          <button class="browser-action" data-preview-nav="back" type="button" aria-label="Go back">←</button>
-          <button class="browser-action" data-preview-nav="forward" type="button" aria-label="Go forward">→</button>
+          <button class="browser-action" data-preview-nav="back" type="button" aria-label="Go back" ${options.canGoBack ? "" : "disabled"}>←</button>
+          <button class="browser-action" data-preview-nav="forward" type="button" aria-label="Go forward" ${options.canGoForward ? "" : "disabled"}>→</button>
           <button class="browser-action" data-preview-nav="reload" type="button" aria-label="Reload">↻</button>
         </div>
         <form class="browser-url-form" data-preview-form>
           <input
-            class="browser-url"
-            data-preview-input
-            name="url"
-            value="${escapeHtml(resolvedPreviewUrl)}"
+            class="browser-origin"
+            data-preview-origin-input
+            name="origin"
+            value="${escapeHtml(location.origin)}"
             spellcheck="false"
             autocomplete="off"
+            placeholder="https://example.com"
+          />
+          <input
+            class="browser-url"
+            data-preview-path-input
+            name="path"
+            value="${escapeHtml(location.path)}"
+            spellcheck="false"
+            autocomplete="off"
+            placeholder="/"
           />
         </form>
         <button class="browser-action" data-preview-open type="button" aria-label="Open in new tab">↗</button>
+      </div>
+      <div class="browser-loading ${options.loading ? "browser-loading-active" : ""}">
+        <span></span>
       </div>
       <iframe
         class="preview-frame"
@@ -1575,22 +1619,78 @@ export const webAppStyles = `
     background: var(--accent-soft);
   }
 
-  .browser-url-form {
-    flex: 1;
+  .browser-action:disabled {
+    cursor: not-allowed;
+    opacity: 0.42;
+    color: var(--dim);
+    background: rgba(255, 255, 255, 0.02);
+    border-color: var(--line);
   }
 
-  .browser-url {
-    width: 100%;
+  .browser-url-form {
     flex: 1;
+    display: grid;
+    grid-template-columns: minmax(180px, 0.42fr) minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .browser-origin,
+  .browser-url {
+    min-width: 0;
     border: 1px solid var(--line);
     border-radius: 999px;
     padding: 8px 12px;
-    color: var(--muted);
+    color: var(--text);
     background: #161c25;
     font-size: 0.85rem;
+    outline: none;
+  }
+
+  .browser-origin::placeholder,
+  .browser-url::placeholder {
+    color: var(--dim);
+  }
+
+  .browser-origin:focus,
+  .browser-url:focus {
+    border-color: rgba(124, 196, 255, 0.4);
+    box-shadow: 0 0 0 3px rgba(124, 196, 255, 0.08);
+  }
+
+  .browser-url {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .browser-loading {
+    height: 2px;
+    background: rgba(255, 255, 255, 0.04);
+    overflow: hidden;
+  }
+
+  .browser-loading span {
+    display: block;
+    width: 22%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, #7cc4ff, transparent);
+    opacity: 0;
+    transform: translateX(-120%);
+  }
+
+  .browser-loading-active span {
+    opacity: 1;
+    animation: browser-loading-slide 1s linear infinite;
+  }
+
+  @keyframes browser-loading-slide {
+    from {
+      transform: translateX(-120%);
+    }
+
+    to {
+      transform: translateX(520%);
+    }
   }
 
   .preview-frame {
@@ -1809,6 +1909,11 @@ export const webAppStyles = `
       align-items: flex-start;
     }
 
+    .browser-url-form {
+      width: 100%;
+      grid-template-columns: 1fr;
+    }
+
     .preview-tabs {
       width: 100%;
       flex-wrap: wrap;
@@ -1919,7 +2024,18 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
             </div>
             <div class="preview-body">
               <div class="preview-panel">
-                ${renderSessionPreview(workbench)}
+                ${renderSessionPreview(workbench, {
+                  ...(input.previewUrl ? { previewUrl: input.previewUrl } : {}),
+                  ...(typeof input.previewCanGoBack === "boolean"
+                    ? { canGoBack: input.previewCanGoBack }
+                    : {}),
+                  ...(typeof input.previewCanGoForward === "boolean"
+                    ? { canGoForward: input.previewCanGoForward }
+                    : {}),
+                  ...(typeof input.previewLoading === "boolean"
+                    ? { loading: input.previewLoading }
+                    : {}),
+                })}
               </div>
               <div class="code-panel">
                 ${renderEditorCode(workbench)}
