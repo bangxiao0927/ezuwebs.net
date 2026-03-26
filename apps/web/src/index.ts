@@ -5,6 +5,7 @@ import {
   workspacePanelLabels,
 } from "@ezu/ui";
 import { type ActionState, type AgentEvent, type PendingInteraction } from "@ezu/protocol";
+import { type WorkspaceFileEntry } from "./workspace";
 
 export { createReplacementPrompt } from "./replacement.js";
 
@@ -22,12 +23,15 @@ export interface WebAppBootstrap {
   initialEvents: AgentEvent[];
   sessionId: string;
   projectId: string;
+  workspaceRoot?: string;
+  workspaceFiles?: WorkspaceFileEntry[];
   webEditor?: Partial<InteractiveWebEditorState>;
   selectedDiffActionId?: string;
   composerText?: string;
   activeFile?: string;
   viewMode?: ViewMode;
   previewUrl?: string;
+  previewAddress?: string;
   previewCanGoBack?: boolean;
   previewCanGoForward?: boolean;
   previewLoading?: boolean;
@@ -644,12 +648,7 @@ function renderDiffPanel(workbench: WorkbenchViewModel): string {
   `;
 }
 
-function renderEditorCode(workbench: WorkbenchViewModel): string {
-  const content =
-    workbench.selectedDiffAction?.action.patch ??
-    workbench.selectedBlock?.html ??
-    workbench.webEditor.suggestedPrompt ??
-    "No editor content available yet.";
+function renderEditorCode(content: string): string {
   const lines = content.split("\n");
 
   return `
@@ -698,6 +697,7 @@ function renderSessionPreview(
   workbench: WorkbenchViewModel,
   options: {
     previewUrl?: string;
+    previewAddress?: string;
     canGoBack?: boolean;
     canGoForward?: boolean;
     loading?: boolean;
@@ -723,7 +723,7 @@ function renderSessionPreview(
             class="browser-url"
             data-preview-url-input
             name="url"
-            value="${escapeHtml(resolvedPreviewUrl)}"
+            value="${escapeHtml(options.previewAddress ?? resolvedPreviewUrl)}"
             spellcheck="false"
             autocomplete="off"
             placeholder="https://example.com"
@@ -1025,9 +1025,102 @@ export const webAppStyles = `
 
   .preview-shell {
     display: grid;
-    grid-template-rows: auto 1fr;
+    grid-template-columns: minmax(280px, 0.32fr) minmax(0, 1fr);
     min-height: 0;
     background: var(--panel-3);
+  }
+
+  .workbench-sidebar {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    min-height: 0;
+    border-right: 1px solid var(--line);
+    background: rgba(11, 17, 29, 0.94);
+  }
+
+  .workbench-sidebar-header {
+    padding: 10px 12px 8px;
+    border-bottom: 1px solid var(--line);
+    display: grid;
+    gap: 8px;
+  }
+
+  .workspace-path-form {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .workspace-path-input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    border-radius: 8px;
+    padding: 6px 8px;
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.03);
+    font-size: 0.86rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    outline: none;
+  }
+
+  .workspace-path-input::placeholder {
+    color: var(--dim);
+  }
+
+  .workspace-path-input:focus {
+    background: rgba(124, 196, 255, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(124, 196, 255, 0.28);
+  }
+
+  .workbench-sidebar-body {
+    padding: 10px 8px;
+    overflow: auto;
+    display: grid;
+    gap: 12px;
+  }
+
+  .sidebar-section {
+    display: grid;
+    gap: 10px;
+  }
+
+  .sidebar-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .sidebar-section-head strong {
+    color: var(--text);
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .file-tree {
+    display: grid;
+    gap: 2px;
+  }
+
+  .file-entry {
+    width: 100%;
+    text-align: left;
+    border: 0;
+    border-radius: 8px;
+    padding: 6px 8px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 0.86rem;
+  }
+
+  .file-entry:hover,
+  .file-entry-active {
+    background: rgba(124, 196, 255, 0.08);
+    color: var(--text);
   }
 
   .preview-topbar {
@@ -1035,9 +1128,14 @@ export const webAppStyles = `
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 12px 16px;
+    padding: 8px 12px;
     border-bottom: 1px solid var(--line);
     background: rgba(18, 21, 28, 0.96);
+  }
+
+  .preview-topbar strong {
+    font-size: 0.88rem;
+    color: var(--text);
   }
 
   .preview-tabs {
@@ -1063,7 +1161,7 @@ export const webAppStyles = `
 
   .preview-body {
     min-height: 0;
-    padding: 16px;
+    padding: 0;
     display: grid;
   }
 
@@ -1073,14 +1171,12 @@ export const webAppStyles = `
   }
 
   .workspace-shell[data-view-mode="preview"] .preview-panel,
-  .workspace-shell[data-view-mode="code"] .code-panel,
-  .workspace-shell[data-view-mode="diff"] .diff-panel {
+  .workspace-shell[data-view-mode="code"] .code-panel {
     display: grid;
   }
 
   .preview-panel,
-  .code-panel,
-  .diff-panel {
+  .code-panel {
     display: none;
     min-height: 0;
   }
@@ -1840,6 +1936,15 @@ export const webAppStyles = `
     }
 
     .preview-shell {
+      grid-template-columns: 1fr;
+    }
+
+    .workbench-sidebar {
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .preview-shell {
       min-height: 60vh;
     }
 
@@ -1882,20 +1987,20 @@ export const webAppStyles = `
 export function renderWebAppBody(input: WebAppBootstrap): string {
   const shell = createWebAppShell(input);
   const { workbench } = shell;
-  const uniqueFiles = [
-    ...new Set([
-      "src",
-      ...(workbench.files.length > 0 ? workbench.files : ["src/App.tsx", "src/index.css", "main.tsx"]),
-      ...(workbench.selectedBlockFile ? [workbench.selectedBlockFile] : []),
-    ]),
-  ];
+  const workspaceFileMap = new Map(
+    (input.workspaceFiles ?? []).map((file) => [file.path, file.content]),
+  );
+  const uniqueFiles = [...new Set(workspaceFileMap.keys())];
   const activeFile =
     input.activeFile ??
-    workbench.selectedDiffAction?.action.path ??
     workbench.selectedBlockFile ??
     uniqueFiles[0] ??
-    "src/App.tsx";
+    "apps/web/src/main.ts";
+  const activeFileContent =
+    workspaceFileMap.get(activeFile) ??
+    `// ${activeFile}\n\nNo file content is available for this workspace path yet.`;
   const viewMode: ViewMode = input.viewMode ?? "preview";
+  const workspaceRoot = input.workspaceRoot ?? "/Users/bangxiao/Documents/ezuwebs.net";
 
   return `
     <main class="app-shell">
@@ -1957,40 +2062,60 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
           </aside>
 
           <section class="preview-shell">
-            <div class="preview-topbar">
-              <form class="workspace-path-form" data-workspace-path-form>
-                <p class="eyebrow">Workspace</p>
-                <input
-                  class="workspace-path-input"
-                  data-workspace-path-input
-                  name="path"
-                  value="${escapeHtml(activeFile)}"
-                  spellcheck="false"
-                  autocomplete="off"
-                />
-              </form>
-              <div class="preview-tabs">
-                <button
-                  class="preview-tab ${viewMode === "preview" ? "preview-tab-active" : ""}"
-                  data-toolbar-action="preview"
-                  type="button"
-                >Preview</button>
-                <button
-                  class="preview-tab ${viewMode === "code" ? "preview-tab-active" : ""}"
-                  data-toolbar-action="code"
-                  type="button"
-                >Code</button>
-                <button
-                  class="preview-tab ${viewMode === "diff" ? "preview-tab-active" : ""}"
-                  data-toolbar-action="diff"
-                  type="button"
-                >Diff</button>
+            <aside class="workbench-sidebar">
+              <div class="workbench-sidebar-header">
+                <form class="workspace-path-form" data-workspace-path-form>
+                  <p class="eyebrow">Workspace Path</p>
+                  <input
+                    class="workspace-path-input"
+                    data-workspace-path-input
+                    name="path"
+                    value="${escapeHtml(workspaceRoot)}"
+                    spellcheck="false"
+                    autocomplete="off"
+                  />
+                </form>
               </div>
-            </div>
-            <div class="preview-body">
+              <div class="workbench-sidebar-body">
+                <section class="sidebar-section">
+                  <div class="sidebar-section-head">
+                    <strong>Filesystem</strong>
+                  </div>
+                  <div class="file-tree">
+                    ${uniqueFiles
+                      .map(
+                        (filePath) => `
+                          <button
+                            type="button"
+                            class="file-entry ${filePath === activeFile ? "file-entry-active" : ""}"
+                            data-file-path="${escapeHtml(filePath)}"
+                          >
+                            ${escapeHtml(filePath)}
+                          </button>
+                        `,
+                      )
+                      .join("")}
+                  </div>
+                </section>
+                <section class="sidebar-section">
+                  <div class="sidebar-section-head">
+                    <strong>Code</strong>
+                  </div>
+                  <div class="code-panel">
+                    ${renderEditorCode(activeFileContent)}
+                  </div>
+                </section>
+              </div>
+            </aside>
+            <section class="preview-body">
+              <div class="preview-topbar">
+                <p class="eyebrow">Runtime Preview</p>
+                <strong>${escapeHtml(activeFile)}</strong>
+              </div>
               <div class="preview-panel">
                 ${renderSessionPreview(workbench, {
                   ...(input.previewUrl ? { previewUrl: input.previewUrl } : {}),
+                  ...(input.previewAddress ? { previewAddress: input.previewAddress } : {}),
                   ...(typeof input.previewCanGoBack === "boolean"
                     ? { canGoBack: input.previewCanGoBack }
                     : {}),
@@ -2002,13 +2127,7 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
                     : {}),
                 })}
               </div>
-              <div class="code-panel">
-                ${renderEditorCode(workbench)}
-              </div>
-              <div class="diff-panel">
-                ${renderDiffPanel(workbench)}
-              </div>
-            </div>
+            </section>
           </section>
         </section>
       </div>

@@ -1,4 +1,5 @@
 import {
+  createWorkbenchViewModel,
   createInteractiveWebEditResponse,
   createInteractiveWebEditorState,
   getWebEditorBlockFile,
@@ -13,15 +14,18 @@ import {
 import { createReplacementPrompt } from "./replacement.js";
 import { createDemoBootstrap, getDemoSessionDefinition, listDemoSessions } from "./demo";
 import { type AgentEvent } from "@ezu/protocol";
+import { getDefaultWorkspaceSnapshot } from "./workspace";
 
 type DialogKind = "share" | "publish" | "sessions" | undefined;
 
 type UiState = {
   activeDialog?: DialogKind;
   composerText: string;
+  workspaceRoot?: string;
   activeFile?: string;
   viewMode: ViewMode;
   previewUrl?: string;
+  previewAddress?: string;
   previewLoading?: boolean;
   toast?: string;
 };
@@ -369,6 +373,93 @@ function isUsablePreviewUrl(value: string | undefined): value is string {
 
   const trimmed = value.trim().toLowerCase();
   return trimmed.length > 0 && trimmed !== "about:blank";
+}
+
+function escapePreviewHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function buildWorkspacePreviewDocument(filePath: string, content: string): string {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapePreviewHtml(filePath)}</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #060816;
+        --panel: #0d1422;
+        --line: rgba(171, 212, 255, 0.14);
+        --text: #f5f7fb;
+        --muted: #94a7c2;
+        --accent: #7cc4ff;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: linear-gradient(180deg, #060816 0%, #09111d 100%);
+        color: var(--text);
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      }
+      main {
+        min-height: 100vh;
+        padding: 24px;
+        display: grid;
+        gap: 16px;
+        align-content: start;
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: rgba(13, 20, 34, 0.72);
+        padding: 20px;
+      }
+      .eyebrow {
+        margin: 0 0 8px;
+        color: var(--accent);
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+      h1, p, pre { margin: 0; }
+      h1 { font-size: 1.6rem; }
+      p { color: var(--muted); line-height: 1.6; }
+      pre {
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="card">
+        <p class="eyebrow">Runtime Preview</p>
+        <h1>${escapePreviewHtml(filePath)}</h1>
+        <p>Preview generated from the current workspace virtual file content.</p>
+      </section>
+      <section class="card">
+        <p class="eyebrow">File Content</p>
+        <pre>${escapePreviewHtml(content)}</pre>
+      </section>
+    </main>
+  </body>
+</html>`;
+}
+
+function createWorkspacePreviewUrl(filePath: string, content: string): string {
+  return `data:text/html;charset=utf-8,${encodeURIComponent(
+    buildWorkspacePreviewDocument(filePath, content),
+  )}`;
 }
 
 function renderSessionLauncher(): string {
@@ -870,13 +961,64 @@ function attachLauncherListeners(target: HTMLElement): void {
 async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<void> {
   const bootstrap = await createDemoBootstrap(sessionId);
   let state = bootstrap;
+  const defaultWorkspace = getDefaultWorkspaceSnapshot();
   let uiState: UiState = {
     composerText: state.composerText ?? "",
+    workspaceRoot: state.workspaceRoot ?? defaultWorkspace.rootPath,
     viewMode: "preview",
   };
   let previewHistory: PreviewHistoryState = {
     entries: [],
     index: -1,
+  };
+
+  const buildWorkspaceFiles = () => {
+    const files = new Map(
+      (state.workspaceFiles ?? defaultWorkspace.files).map((file) => [file.path, file.content]),
+    );
+    const workbench = createWorkbenchViewModel(state);
+
+    for (const action of workbench.actions) {
+      if (action.action.type === "file.write") {
+        files.set(action.action.path, action.action.content);
+      }
+
+      if (action.action.type === "file.patch") {
+        files.set(action.action.path, action.action.patch);
+      }
+    }
+
+    if (workbench.selectedBlockFile && workbench.selectedBlock?.html) {
+      files.set(workbench.selectedBlockFile, workbench.selectedBlock.html);
+    }
+
+    if (!files.has("apps/web/src/index.ts") && workbench.webEditor.suggestedPrompt) {
+      files.set("apps/web/src/index.ts", workbench.webEditor.suggestedPrompt);
+    }
+
+    return files;
+  };
+
+  const syncGeneratedPreview = () => {
+    const files = buildWorkspaceFiles();
+    const activePath =
+      uiState.activeFile ??
+      state.activeFile ??
+      createWorkbenchViewModel(state).selectedBlockFile ??
+      [...files.keys()][0] ??
+      "apps/web/src/main.ts";
+    const nextContent =
+      files.get(activePath) ??
+      `// ${activePath}\n\nNo file content is available for this workspace path yet.`;
+    const nextPreviewUrl = createWorkspacePreviewUrl(activePath, nextContent);
+    const nextPreviewAddress = `workspace://${activePath}`;
+
+    uiState = {
+      ...uiState,
+      activeFile: activePath,
+      previewUrl: nextPreviewUrl,
+      previewAddress: nextPreviewAddress,
+    };
   };
 
   const getDefaultPreviewUrl = (): string | undefined => {
@@ -927,6 +1069,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
   };
 
   const render = () => {
+    syncGeneratedPreview();
     syncPreviewHistory();
     state = {
       ...state,
@@ -934,9 +1077,12 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
     };
     const renderState: WebAppBootstrap = {
       ...state,
+      ...(uiState.workspaceRoot ? { workspaceRoot: uiState.workspaceRoot } : {}),
+      workspaceFiles: [...buildWorkspaceFiles()].map(([path, content]) => ({ path, content })),
       viewMode: uiState.viewMode,
       ...(uiState.activeFile ? { activeFile: uiState.activeFile } : {}),
       ...(uiState.previewUrl ? { previewUrl: uiState.previewUrl } : {}),
+      ...(uiState.previewAddress ? { previewAddress: uiState.previewAddress } : {}),
       ...(typeof uiState.previewLoading === "boolean"
         ? { previewLoading: uiState.previewLoading }
         : {}),
@@ -1066,7 +1212,6 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
 
       uiState = {
         ...uiState,
-        previewUrl: normalized,
         previewLoading: false,
       };
 
@@ -1090,6 +1235,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
       uiState = {
         ...uiState,
         previewUrl: nextUrl,
+        previewAddress: nextUrl,
         previewLoading: true,
       };
       render();
@@ -1105,7 +1251,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
 
       uiState = {
         ...uiState,
-        activeFile: nextPath,
+        workspaceRoot: nextPath,
       };
       render();
     });
@@ -1132,6 +1278,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
           uiState = {
             ...uiState,
             ...(nextPreviewUrl ? { previewUrl: nextPreviewUrl } : {}),
+            ...(nextPreviewUrl ? { previewAddress: nextPreviewUrl } : {}),
             previewLoading: true,
           };
           render();
@@ -1151,6 +1298,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
           uiState = {
             ...uiState,
             ...(nextPreviewUrl ? { previewUrl: nextPreviewUrl } : {}),
+            ...(nextPreviewUrl ? { previewAddress: nextPreviewUrl } : {}),
             previewLoading: true,
           };
           render();
