@@ -33,8 +33,10 @@ test("createReplacementStructurePatch changes output based on rejection reason",
   const copyPatch = createReplacementStructurePatch(createOptions("copy is too generic"), "gpt-test");
 
   assert.notEqual(layoutPatch, copyPatch);
-  assert.match(layoutPatch, /"decisionPanel"/);
+  assert.match(layoutPatch, /id: "decisionPanel"/);
   assert.match(layoutPatch, /Promote structure changes ahead of wording changes\./);
-  assert.match(copyPatch, /"messageStrip"/);
+  assert.match(layoutPatch, /export function renderReplacementStructure\(\)/);
+  assert.match(copyPatch, /id: "messageStrip"/);
   assert.match(copyPatch, /Rewrite visible strings so the replacement explains the intended action more directly\./);
+  assert.match(copyPatch, /<section class=\\"replacement-messageStrip\\">MessageStrip<\/section>/);
 });
