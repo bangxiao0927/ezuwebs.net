@@ -1,4 +1,5 @@
 import {
+  createWorkbenchViewModel,
   createInteractiveWebEditResponse,
   createInteractiveWebEditorState,
   getWebEditorBlockFile,
@@ -7,22 +8,314 @@ import {
   upsertInteractiveWebEditorProperty,
   webAppStyles,
   type InteractiveWebEditRequest,
+  type PreviewMode,
   type ViewMode,
   type WebAppBootstrap,
 } from "./index";
 import { createReplacementPrompt } from "./replacement.js";
 import { createDemoBootstrap, getDemoSessionDefinition, listDemoSessions } from "./demo";
 import { type AgentEvent } from "@ezu/protocol";
+import { getDefaultWorkspaceSnapshot } from "./workspace";
 
 type DialogKind = "share" | "publish" | "sessions" | undefined;
 
 type UiState = {
   activeDialog?: DialogKind;
   composerText: string;
+  workspaceRoot?: string;
   activeFile?: string;
   viewMode: ViewMode;
+  previewMode: PreviewMode;
+  previewUrl?: string;
+  previewAddress?: string;
+  previewLoading?: boolean;
   toast?: string;
 };
+
+type PreviewHistoryState = {
+  entries: string[];
+  index: number;
+};
+
+const THREADS_VERTEX_SHADER = `
+attribute vec2 position;
+void main() {
+  gl_Position = vec4(position, 0.0, 1.0);
+}
+`;
+
+const THREADS_FRAGMENT_SHADER = `
+precision highp float;
+
+uniform float iTime;
+uniform vec3 iResolution;
+uniform vec3 uColor;
+uniform float uAmplitude;
+uniform float uDistance;
+uniform vec2 uMouse;
+
+#define PI 3.1415926538
+
+const int u_line_count = 28;
+const float u_line_width = 4.0;
+const float u_line_blur = 6.0;
+
+float Perlin2D(vec2 P) {
+    vec2 Pi = floor(P);
+    vec4 Pf_Pfmin1 = P.xyxy - vec4(Pi, Pi + 1.0);
+    vec4 Pt = vec4(Pi.xy, Pi.xy + 1.0);
+    Pt = Pt - floor(Pt * (1.0 / 71.0)) * 71.0;
+    Pt += vec2(26.0, 161.0).xyxy;
+    Pt *= Pt;
+    Pt = Pt.xzxz * Pt.yyww;
+    vec4 hash_x = fract(Pt * (1.0 / 951.135664));
+    vec4 hash_y = fract(Pt * (1.0 / 642.949883));
+    vec4 grad_x = hash_x - 0.49999;
+    vec4 grad_y = hash_y - 0.49999;
+    vec4 grad_results = inversesqrt(grad_x * grad_x + grad_y * grad_y)
+        * (grad_x * Pf_Pfmin1.xzxz + grad_y * Pf_Pfmin1.yyww);
+    grad_results *= 1.4142135623730950;
+    vec2 blend = Pf_Pfmin1.xy * Pf_Pfmin1.xy * Pf_Pfmin1.xy
+               * (Pf_Pfmin1.xy * (Pf_Pfmin1.xy * 6.0 - 15.0) + 10.0);
+    vec4 blend2 = vec4(blend, vec2(1.0 - blend));
+    return dot(grad_results, blend2.zxzx * blend2.wwyy);
+}
+
+float pixel(float count, vec2 resolution) {
+    return (1.0 / max(resolution.x, resolution.y)) * count;
+}
+
+float lineFn(vec2 st, float width, float perc, vec2 mouse, float time, float amplitude, float distance) {
+    float split_offset = (perc * 0.4);
+    float split_point = 0.1 + split_offset;
+
+    float amplitude_normal = smoothstep(split_point, 0.7, st.x);
+    float amplitude_strength = 0.5;
+    float finalAmplitude = amplitude_normal * amplitude_strength
+                           * amplitude * (1.0 + (mouse.y - 0.5) * 0.2);
+
+    float time_scaled = time / 10.0 + (mouse.x - 0.5) * 1.0;
+    float blur = smoothstep(split_point, split_point + 0.05, st.x) * perc;
+
+    float xnoise = mix(
+        Perlin2D(vec2(time_scaled, st.x + perc) * 2.5),
+        Perlin2D(vec2(time_scaled, st.x + time_scaled) * 3.5) / 1.5,
+        st.x * 0.3
+    );
+
+    float y = 0.5 + (perc - 0.5) * distance + xnoise / 2.0 * finalAmplitude;
+
+    float line_start = smoothstep(
+        y + (width / 2.0) + (u_line_blur * pixel(1.0, iResolution.xy) * blur),
+        y,
+        st.y
+    );
+
+    float line_end = smoothstep(
+        y,
+        y - (width / 2.0) - (u_line_blur * pixel(1.0, iResolution.xy) * blur),
+        st.y
+    );
+
+    return clamp(
+        (line_start - line_end) * (1.0 - smoothstep(0.0, 1.0, pow(perc, 0.3))),
+        0.0,
+        1.0
+    );
+}
+
+void main() {
+    vec2 uv = gl_FragCoord.xy / iResolution.xy;
+
+    float line_strength = 1.0;
+    for (int i = 0; i < u_line_count; i++) {
+        float p = float(i) / float(u_line_count);
+        line_strength *= (1.0 - lineFn(
+            uv,
+            u_line_width * pixel(1.0, iResolution.xy) * (1.0 - p),
+            p,
+            uMouse,
+            iTime,
+            uAmplitude,
+            uDistance
+        ));
+    }
+
+    float colorVal = 1.0 - line_strength;
+    gl_FragColor = vec4(uColor * colorVal, colorVal);
+}
+`;
+
+let cleanupLauncherEffects: (() => void) | undefined;
+
+function createShader(
+  gl: WebGLRenderingContext,
+  type: number,
+  source: string,
+): WebGLShader {
+  const shader = gl.createShader(type);
+
+  if (!shader) {
+    throw new Error("Failed to create shader.");
+  }
+
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const info = gl.getShaderInfoLog(shader) ?? "Unknown shader compile error.";
+    gl.deleteShader(shader);
+    throw new Error(info);
+  }
+
+  return shader;
+}
+
+function createProgram(gl: WebGLRenderingContext): WebGLProgram {
+  const vertexShader = createShader(gl, gl.VERTEX_SHADER, THREADS_VERTEX_SHADER);
+  const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, THREADS_FRAGMENT_SHADER);
+  const program = gl.createProgram();
+
+  if (!program) {
+    gl.deleteShader(vertexShader);
+    gl.deleteShader(fragmentShader);
+    throw new Error("Failed to create WebGL program.");
+  }
+
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  gl.deleteShader(vertexShader);
+  gl.deleteShader(fragmentShader);
+
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    const info = gl.getProgramInfoLog(program) ?? "Unknown program link error.";
+    gl.deleteProgram(program);
+    throw new Error(info);
+  }
+
+  return program;
+}
+
+function mountLauncherThreads(target: HTMLElement): () => void {
+  const canvas = document.createElement("canvas");
+  const gl = canvas.getContext("webgl", {
+    alpha: true,
+    antialias: false,
+    premultipliedAlpha: true,
+  });
+
+  if (!gl) {
+    return () => {};
+  }
+
+  canvas.className = "launcher-threads-canvas";
+  target.append(canvas);
+
+  let program: WebGLProgram;
+
+  try {
+    program = createProgram(gl);
+  } catch (error) {
+    console.error(error);
+    canvas.remove();
+    return () => {};
+  }
+
+  const positionLocation = gl.getAttribLocation(program, "position");
+  const timeLocation = gl.getUniformLocation(program, "iTime");
+  const amplitudeLocation = gl.getUniformLocation(program, "uAmplitude");
+  const colorLocation = gl.getUniformLocation(program, "uColor");
+  const resolutionLocation = gl.getUniformLocation(program, "iResolution");
+  const distanceLocation = gl.getUniformLocation(program, "uDistance");
+  const mouseLocation = gl.getUniformLocation(program, "uMouse");
+
+  const geometryBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, geometryBuffer);
+  gl.bufferData(
+    gl.ARRAY_BUFFER,
+    new Float32Array([-1, -1, 3, -1, -1, 3]),
+    gl.STATIC_DRAW,
+  );
+
+  gl.enableVertexAttribArray(positionLocation);
+  gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+  gl.useProgram(program);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.clearColor(0, 0, 0, 0);
+  gl.uniform3f(colorLocation, 1, 1, 1);
+  gl.uniform1f(amplitudeLocation, 1);
+  gl.uniform1f(distanceLocation, 0);
+  gl.uniform2f(mouseLocation, 0.5, 0.5);
+
+  const resize = () => {
+    const width = Math.max(1, Math.floor(target.clientWidth));
+    const height = Math.max(1, Math.floor(target.clientHeight));
+    const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
+
+    canvas.width = Math.floor(width * ratio);
+    canvas.height = Math.floor(height * ratio);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.uniform3f(resolutionLocation, canvas.width, canvas.height, canvas.width / canvas.height);
+  };
+
+  resize();
+  window.addEventListener("resize", resize);
+
+  let currentMouseX = 0.5;
+  let currentMouseY = 0.5;
+  let targetMouseX = 0.5;
+  let targetMouseY = 0.5;
+
+  const handleMouseMove = (event: MouseEvent) => {
+    const rect = target.getBoundingClientRect();
+    targetMouseX = (event.clientX - rect.left) / rect.width;
+    targetMouseY = 1 - (event.clientY - rect.top) / rect.height;
+  };
+
+  const handleMouseLeave = () => {
+    targetMouseX = 0.5;
+    targetMouseY = 0.5;
+  };
+
+  target.addEventListener("mousemove", handleMouseMove);
+  target.addEventListener("mouseleave", handleMouseLeave);
+
+  let frameId = 0;
+  let lastRenderTime = 0;
+
+  const renderFrame = (now: number) => {
+    frameId = requestAnimationFrame(renderFrame);
+    if (document.hidden || now - lastRenderTime < 33) {
+      return;
+    }
+    lastRenderTime = now;
+    gl.useProgram(program);
+    currentMouseX += 0.05 * (targetMouseX - currentMouseX);
+    currentMouseY += 0.05 * (targetMouseY - currentMouseY);
+    gl.uniform2f(mouseLocation, currentMouseX, currentMouseY);
+    gl.uniform1f(timeLocation, now * 0.001);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  };
+
+  frameId = requestAnimationFrame(renderFrame);
+
+  return () => {
+    cancelAnimationFrame(frameId);
+    window.removeEventListener("resize", resize);
+    target.removeEventListener("mousemove", handleMouseMove);
+    target.removeEventListener("mouseleave", handleMouseLeave);
+    gl.deleteBuffer(geometryBuffer);
+    gl.deleteProgram(program);
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+    canvas.remove();
+  };
+}
 
 function ensureStyles(documentRef: Document): void {
   const existing = documentRef.getElementById("web-app-styles");
@@ -55,17 +348,477 @@ function setSessionHash(sessionId: string): void {
   }
 }
 
+function goHome(): void {
+  if (location.hash) {
+    history.pushState("", document.title, `${location.pathname}${location.search}`);
+  }
+  void mount();
+}
+
+function normalizePreviewUrl(value: string): string {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed) || trimmed.startsWith("/")) {
+    return trimmed;
+  }
+
+  if (/^(localhost|127\.0\.0\.1|0\.0\.0\.0)/.test(trimmed)) {
+    return `http://${trimmed}`;
+  }
+
+  return `https://${trimmed}`;
+}
+
+function isUsablePreviewUrl(value: string | undefined): value is string {
+  if (!value) {
+    return false;
+  }
+
+  const trimmed = value.trim().toLowerCase();
+  return trimmed.length > 0 && trimmed !== "about:blank";
+}
+
+function escapePreviewHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function countMatches(value: string, pattern: RegExp): number {
+  return [...value.matchAll(pattern)].length;
+}
+
+function inferPreviewLanguage(filePath: string): string {
+  const extension = filePath.split(".").pop()?.toLowerCase();
+
+  if (!extension) {
+    return "text";
+  }
+
+  if (extension === "ts" || extension === "tsx") {
+    return "typescript";
+  }
+
+  if (extension === "js" || extension === "jsx") {
+    return "javascript";
+  }
+
+  if (extension === "md") {
+    return "markdown";
+  }
+
+  if (extension === "json") {
+    return "json";
+  }
+
+  if (extension === "yml" || extension === "yaml") {
+    return "yaml";
+  }
+
+  return extension;
+}
+
+function buildPreviewSummary(filePath: string, content: string): Array<{ label: string; value: string }> {
+  const lines = content.length === 0 ? 0 : content.split("\n").length;
+  const imports = countMatches(content, /^\s*import\s/mg);
+  const exports = countMatches(content, /^\s*export\s/mg);
+  const components = countMatches(content, /\bfunction\s+[A-Z]\w*|\bconst\s+[A-Z]\w*\s*=/g);
+
+  return [
+    { label: "Path", value: filePath },
+    { label: "Language", value: inferPreviewLanguage(filePath) },
+    { label: "Lines", value: String(lines) },
+    { label: "Imports", value: String(imports) },
+    { label: "Exports", value: String(exports) },
+    { label: "Components", value: String(components) },
+  ];
+}
+
+function buildRenderedPreview(filePath: string, content: string): string {
+  const extension = filePath.split(".").pop()?.toLowerCase();
+  const trimmed = content.trim();
+
+  if (extension === "html" || /^\s*<!doctype html>|^\s*<html[\s>]|^\s*<main[\s>]|^\s*<section[\s>]/i.test(trimmed)) {
+    return content;
+  }
+
+  const title = filePath.split("/").pop() ?? filePath;
+  const summary = buildPreviewSummary(filePath, content);
+  const highlighted = content
+    .split("\n")
+    .slice(0, 14)
+    .join("\n");
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #06101c;
+        --panel: rgba(10, 19, 31, 0.9);
+        --line: rgba(124, 196, 255, 0.18);
+        --text: #f5f7fb;
+        --muted: #8fa5c0;
+        --accent: #7cc4ff;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(124, 196, 255, 0.18), transparent 24%),
+          linear-gradient(180deg, #040812 0%, var(--bg) 100%);
+      }
+      main {
+        min-height: 100vh;
+        padding: 24px;
+        display: grid;
+        gap: 16px;
+        align-content: start;
+      }
+      .hero,
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        background: var(--panel);
+      }
+      .hero {
+        padding: 22px;
+        display: grid;
+        gap: 10px;
+      }
+      .eyebrow {
+        margin: 0;
+        color: var(--accent);
+        font-size: 12px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+      h1, h2, p, pre {
+        margin: 0;
+      }
+      h1 {
+        font-size: clamp(1.8rem, 4vw, 2.8rem);
+        line-height: 0.94;
+      }
+      p {
+        color: var(--muted);
+        line-height: 1.6;
+      }
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+        gap: 10px;
+      }
+      .chip {
+        padding: 12px 14px;
+        border-radius: 16px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .chip strong,
+      .chip span {
+        display: block;
+      }
+      .chip strong {
+        font-size: 0.74rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .chip span {
+        margin-top: 8px;
+        font-size: 0.95rem;
+        color: var(--text);
+        word-break: break-word;
+      }
+      .panel {
+        overflow: hidden;
+      }
+      .browser-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line);
+      }
+      .browser-dots {
+        display: flex;
+        gap: 8px;
+      }
+      .browser-dots span {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.3);
+      }
+      .browser-url {
+        flex: 1;
+        min-width: 0;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        background: rgba(255, 255, 255, 0.03);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      pre {
+        padding: 18px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <p class="eyebrow">Runtime Preview</p>
+        <h1>${escapePreviewHtml(title)}</h1>
+        <p>This file is not directly renderable as HTML, so the preview surfaces structure and code context instead.</p>
+        <div class="summary">
+          ${summary
+            .map(
+              (item) => `
+                <article class="chip">
+                  <strong>${escapePreviewHtml(item.label)}</strong>
+                  <span>${escapePreviewHtml(item.value)}</span>
+                </article>
+              `,
+            )
+            .join("")}
+        </div>
+      </section>
+      <section class="panel">
+        <div class="browser-bar">
+          <div class="browser-dots"><span></span><span></span><span></span></div>
+          <div class="browser-url">workspace://${escapePreviewHtml(filePath)}</div>
+        </div>
+        <pre>${escapePreviewHtml(highlighted)}</pre>
+      </section>
+    </main>
+  </body>
+</html>`;
+}
+
+function buildWorkspacePreviewDocument(filePath: string, content: string): string {
+  const renderedPreview = buildRenderedPreview(filePath, content);
+  const summary = buildPreviewSummary(filePath, content);
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapePreviewHtml(filePath)}</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #060816;
+        --panel: rgba(13, 20, 34, 0.82);
+        --panel-soft: rgba(11, 18, 30, 0.9);
+        --line: rgba(171, 212, 255, 0.14);
+        --text: #f5f7fb;
+        --muted: #94a7c2;
+        --accent: #7cc4ff;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: linear-gradient(180deg, #060816 0%, #09111d 100%);
+        color: var(--text);
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      }
+      main {
+        min-height: 100vh;
+        padding: 24px;
+        display: grid;
+        gap: 16px;
+        align-content: start;
+      }
+      .layout {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--panel);
+        padding: 20px;
+      }
+      .card-tight {
+        padding: 0;
+        overflow: hidden;
+      }
+      .eyebrow {
+        margin: 0 0 8px;
+        color: var(--accent);
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+      h1, h2, p, pre { margin: 0; }
+      h1 { font-size: 1.6rem; }
+      h2 { font-size: 1rem; }
+      p { color: var(--muted); line-height: 1.6; }
+      .meta-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 10px;
+        margin-top: 14px;
+      }
+      .meta-chip {
+        padding: 12px 14px;
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .meta-chip strong,
+      .meta-chip span {
+        display: block;
+      }
+      .meta-chip strong {
+        color: var(--muted);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .meta-chip span {
+        margin-top: 8px;
+        color: var(--text);
+        word-break: break-word;
+      }
+      .panel-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel-soft);
+      }
+      .panel-head code {
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .preview-stage {
+        min-height: 460px;
+        width: 100%;
+        border: 0;
+        background: white;
+      }
+      pre {
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+      .source {
+        max-height: 560px;
+        padding: 18px;
+        background: rgba(8, 13, 22, 0.9);
+      }
+      @media (max-width: 900px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+        .preview-stage {
+          min-height: 320px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="card">
+        <p class="eyebrow">Runtime Preview</p>
+        <h1>${escapePreviewHtml(filePath)}</h1>
+        <p>Preview generated from the current workspace file state, with a rendered surface and the underlying source side by side.</p>
+        <div class="meta-grid">
+          ${summary
+            .map(
+              (item) => `
+                <div class="meta-chip">
+                  <strong>${escapePreviewHtml(item.label)}</strong>
+                  <span>${escapePreviewHtml(item.value)}</span>
+                </div>
+              `,
+            )
+            .join("")}
+        </div>
+      </section>
+      <div class="layout">
+        <section class="card card-tight">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Rendered Surface</p>
+              <h2>workspace://${escapePreviewHtml(filePath)}</h2>
+            </div>
+            <code>live file snapshot</code>
+          </div>
+          <iframe
+            class="preview-stage"
+            srcdoc="${escapePreviewHtml(renderedPreview)}"
+            title="${escapePreviewHtml(filePath)} rendered preview"
+          ></iframe>
+        </section>
+        <section class="card card-tight">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Source</p>
+              <h2>${escapePreviewHtml(filePath)}</h2>
+            </div>
+            <code>${escapePreviewHtml(inferPreviewLanguage(filePath))}</code>
+          </div>
+          <pre class="source">${escapePreviewHtml(content)}</pre>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>`;
+}
+
+function createWorkspacePreviewUrl(filePath: string, content: string): string {
+  return `data:text/html;charset=utf-8,${encodeURIComponent(
+    buildWorkspacePreviewDocument(filePath, content),
+  )}`;
+}
+
 function renderSessionLauncher(): string {
   const sessionCards = listDemoSessions()
     .map(
-      (session) => `
-        <div class="launcher-card">
-          <p class="eyebrow">Session</p>
+      (session, index) => `
+        <button class="launcher-card" data-open-session="${session.id}" type="button">
+          <div class="launcher-card-head">
+            <p class="eyebrow">Session 0${index + 1}</p>
+            <span class="launcher-chip">Open</span>
+          </div>
           <h2>${session.title}</h2>
           <p>${session.description}</p>
-          <span class="launcher-meta">${session.taskTitle}</span>
-          <button class="launcher-button" data-open-session="${session.id}" type="button">Open Session</button>
-        </div>
+          <div class="launcher-card-meta">
+            <span class="launcher-meta">${session.taskTitle}</span>
+            <span class="launcher-meta">${session.taskTimestamp}</span>
+          </div>
+        </button>
       `,
     )
     .join("");
@@ -73,19 +826,21 @@ function renderSessionLauncher(): string {
   return `
     <main class="launcher-shell">
       <section class="launcher-hero">
-        <p class="eyebrow">Session Router</p>
-        <h1>Open a workspace per conversation instead of treating the homepage as the workbench.</h1>
-        <p class="launcher-copy">
-          Each session gets its own IDE-style page with conversation context, files, code, terminal output,
-          and an embedded browser runtime preview.
-        </p>
-        <div class="launcher-actions">
-          <button class="launcher-button launcher-button-primary" data-open-session="club-promo" type="button">Open Demo Session</button>
-          <button class="launcher-button" data-open-session="agency-redesign" type="button">Open Agency Session</button>
+        <div class="launcher-threads" data-launcher-threads></div>
+        <div class="launcher-hero-copy">
+          <p class="eyebrow">Threads Homepage</p>
+          <h1>ezuwebs.net</h1>
+          <p class="launcher-copy">
+            Session-first workspace for shipping interfaces, previews, and patch reviews.
+          </p>
+          <div class="launcher-actions">
+            <button class="launcher-button launcher-button-primary" data-open-session="club-promo" type="button">Open Demo Session</button>
+            <button class="launcher-button" data-open-session="agency-redesign" type="button">Open Agency Session</button>
+          </div>
+          <div class="launcher-grid">
+            ${sessionCards}
+          </div>
         </div>
-      </section>
-      <section class="launcher-grid">
-        ${sessionCards}
       </section>
     </main>
   `;
@@ -95,85 +850,214 @@ function attachLauncherStyles(): void {
   const style = document.createElement("style");
   style.dataset.app = "launcher";
   style.textContent = `
-    .launcher-shell {
-      min-height: 100vh;
-      padding: 32px;
-      display: grid;
-      gap: 24px;
-      background: #0d0f14;
-      color: #edf2ff;
+    :root {
+      color-scheme: dark;
+      --launcher-text: #f5f7fb;
+      --launcher-muted: #94a7c2;
+      --launcher-border: rgba(171, 212, 255, 0.14);
+      --launcher-panel: rgba(13, 20, 34, 0.34);
+      --launcher-surface: rgba(19, 29, 45, 0.72);
+      --launcher-accent: #7cc4ff;
+      --launcher-shadow: 0 24px 90px rgba(0, 0, 0, 0.42);
     }
 
-    .launcher-hero,
-    .launcher-card {
-      border: 1px solid rgba(255, 255, 255, 0.08);
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(124, 196, 255, 0.14), transparent 24%),
+        linear-gradient(180deg, #060816 0%, #09111d 100%);
+      color: var(--launcher-text);
+    }
+
+    .launcher-shell {
+      min-height: 100vh;
+      display: grid;
+    }
+
+    .launcher-card,
+    .launcher-hero {
+      position: relative;
+      border: 1px solid var(--launcher-border);
       border-radius: 24px;
-      background: rgba(20, 23, 29, 0.92);
-      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+      background: var(--launcher-panel);
+      box-shadow: var(--launcher-shadow);
+      backdrop-filter: blur(14px);
     }
 
     .launcher-hero {
-      padding: 28px;
+      display: grid;
+      place-items: center;
+      min-height: 100vh;
+      padding: 32px;
+      overflow: hidden;
+      background: radial-gradient(circle at center, rgba(18, 30, 50, 0.42), rgba(6, 8, 22, 0.94));
+    }
+
+    .launcher-threads {
+      position: absolute;
+      inset: 0;
+    }
+
+    .launcher-threads {
+      opacity: 1;
+    }
+
+    .launcher-threads-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .launcher-hero-copy {
+      display: grid;
+      gap: 18px;
+      position: relative;
+      z-index: 1;
+      width: min(960px, 100%);
+      text-align: center;
+      justify-items: center;
     }
 
     .launcher-hero h1,
     .launcher-card h2 {
-      margin: 10px 0 12px;
-      font-family: "Space Grotesk", "Segoe UI", sans-serif;
+      margin: 0;
+      font-family: "Space Grotesk", "Avenir Next", sans-serif;
       letter-spacing: -0.05em;
+    }
+
+    .launcher-hero h1 {
+      font-size: clamp(4rem, 12vw, 8rem);
+      line-height: 0.88;
     }
 
     .launcher-copy,
     .launcher-card p,
     .launcher-meta {
-      color: #9aa4b2;
+      color: var(--launcher-muted);
       line-height: 1.7;
       margin: 0;
     }
 
+    .launcher-actions,
+    .launcher-card-meta,
+    .launcher-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .launcher-actions {
+      justify-content: center;
+    }
+
+    .launcher-chip {
+      color: #d9ecff;
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
     .launcher-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
       gap: 18px;
+      width: min(960px, 100%);
     }
 
     .launcher-card {
       padding: 22px;
       color: inherit;
-      text-decoration: none;
+      text-align: left;
       display: grid;
-      gap: 10px;
+      gap: 14px;
+      cursor: pointer;
+      transition:
+        transform 180ms ease,
+        border-color 180ms ease,
+        background 180ms ease;
     }
 
-    .launcher-actions {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-top: 18px;
+    .launcher-chip {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(124, 196, 255, 0.08);
+      border: 1px solid rgba(124, 196, 255, 0.18);
+    }
+
+    .launcher-card h2 {
+      font-size: 1.35rem;
+    }
+
+    .launcher-card-meta {
+      align-items: flex-start;
+      color: var(--launcher-muted);
+      font-size: 13px;
     }
 
     .launcher-button {
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--launcher-border);
       border-radius: 999px;
-      background: rgba(255, 255, 255, 0.04);
-      color: #edf2ff;
-      padding: 10px 14px;
+      background: var(--launcher-surface);
+      color: var(--launcher-text);
+      padding: 12px 16px;
       cursor: pointer;
+      font: inherit;
+      transition:
+        transform 180ms ease,
+        border-color 180ms ease,
+        background 180ms ease;
     }
 
     .launcher-button-primary {
-      background: #4f8cff;
+      background: var(--launcher-accent);
       border-color: transparent;
-      color: white;
+      color: #08101d;
     }
 
+    .launcher-button:hover,
     .launcher-card:hover {
-      border-color: rgba(79, 140, 255, 0.34);
-      transform: translateY(-1px);
+      border-color: rgba(124, 196, 255, 0.28);
+      transform: translateY(-2px);
+    }
+
+    .launcher-button:hover {
+      background: rgba(124, 196, 255, 0.12);
     }
 
     .launcher-meta {
       font-size: 13px;
+    }
+
+    .eyebrow {
+      margin: 0;
+      color: rgba(255, 255, 255, 0.72);
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    @media (max-width: 980px) {
+      .launcher-hero {
+        padding: 24px;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .launcher-hero,
+      .launcher-card {
+        border-radius: 20px;
+      }
+
+      .launcher-hero {
+        padding: 18px;
+      }
+
+      .launcher-hero h1 {
+        font-size: 3rem;
+      }
     }
   `;
   document.head.append(style);
@@ -408,25 +1292,140 @@ function attachLauncherListeners(target: HTMLElement): void {
       }
     });
   }
+
+  const threadsTarget = target.querySelector<HTMLElement>("[data-launcher-threads]");
+
+  cleanupLauncherEffects?.();
+  cleanupLauncherEffects = threadsTarget ? mountLauncherThreads(threadsTarget) : undefined;
 }
 
 async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<void> {
   const bootstrap = await createDemoBootstrap(sessionId);
   let state = bootstrap;
+  const defaultWorkspace = getDefaultWorkspaceSnapshot();
   let uiState: UiState = {
     composerText: state.composerText ?? "",
+    workspaceRoot: state.workspaceRoot ?? defaultWorkspace.rootPath,
     viewMode: "preview",
+    previewMode: state.previewMode ?? "runtime",
+  };
+  let previewHistory: PreviewHistoryState = {
+    entries: [],
+    index: -1,
+  };
+
+  const buildWorkspaceFiles = () => {
+    const files = new Map(
+      (state.workspaceFiles ?? defaultWorkspace.files).map((file) => [file.path, file.content]),
+    );
+    const workbench = createWorkbenchViewModel(state);
+
+    for (const action of workbench.actions) {
+      if (action.action.type === "file.write") {
+        files.set(action.action.path, action.action.content);
+      }
+
+      if (action.action.type === "file.patch") {
+        files.set(action.action.path, action.action.patch);
+      }
+    }
+
+    if (workbench.selectedBlockFile && workbench.selectedBlock?.html) {
+      files.set(workbench.selectedBlockFile, workbench.selectedBlock.html);
+    }
+
+    if (!files.has("apps/web/src/index.ts") && workbench.webEditor.suggestedPrompt) {
+      files.set("apps/web/src/index.ts", workbench.webEditor.suggestedPrompt);
+    }
+
+    return files;
+  };
+
+  const syncActiveFileSelection = () => {
+    const files = buildWorkspaceFiles();
+    const activePath =
+      uiState.activeFile ??
+      state.activeFile ??
+      createWorkbenchViewModel(state).selectedBlockFile ??
+      [...files.keys()][0] ??
+      "apps/web/src/main.ts";
+
+    uiState = {
+      ...uiState,
+      activeFile: activePath,
+    };
+  };
+
+  const getDefaultPreviewUrl = (): string | undefined => {
+    const latestPreviewEvent = [...state.initialEvents]
+      .reverse()
+      .find(
+        (
+          event,
+        ): event is Extract<AgentEvent, { type: "preview.ready" }> =>
+          event.type === "preview.ready",
+      );
+
+    return latestPreviewEvent?.url;
+  };
+
+  const syncPreviewHistory = (nextUrl?: string) => {
+    const resolvedUrl = nextUrl ?? uiState.previewUrl ?? getDefaultPreviewUrl();
+
+    if (!isUsablePreviewUrl(resolvedUrl)) {
+      return;
+    }
+
+    if (previewHistory.index >= 0 && previewHistory.entries[previewHistory.index] === resolvedUrl) {
+      uiState = {
+        ...uiState,
+        previewUrl: resolvedUrl,
+        previewAddress: resolvedUrl,
+      };
+      return;
+    }
+
+    const existingIndex = previewHistory.entries.lastIndexOf(resolvedUrl);
+    if (existingIndex >= 0) {
+      previewHistory = {
+        entries: previewHistory.entries,
+        index: existingIndex,
+      };
+    } else {
+      previewHistory = {
+        entries: [...previewHistory.entries.slice(0, previewHistory.index + 1), resolvedUrl],
+        index: previewHistory.index + 1,
+      };
+    }
+
+    uiState = {
+      ...uiState,
+      previewUrl: resolvedUrl,
+      previewAddress: resolvedUrl,
+    };
   };
 
   const render = () => {
+    syncActiveFileSelection();
+    syncPreviewHistory();
     state = {
       ...state,
       composerText: uiState.composerText,
     };
     const renderState: WebAppBootstrap = {
       ...state,
-      activeFile: uiState.activeFile,
+      ...(uiState.workspaceRoot ? { workspaceRoot: uiState.workspaceRoot } : {}),
+      workspaceFiles: [...buildWorkspaceFiles()].map(([path, content]) => ({ path, content })),
       viewMode: uiState.viewMode,
+      previewMode: uiState.previewMode,
+      ...(uiState.activeFile ? { activeFile: uiState.activeFile } : {}),
+      ...(uiState.previewUrl ? { previewUrl: uiState.previewUrl } : {}),
+      ...(uiState.previewAddress ? { previewAddress: uiState.previewAddress } : {}),
+      ...(typeof uiState.previewLoading === "boolean"
+        ? { previewLoading: uiState.previewLoading }
+        : {}),
+      previewCanGoBack: previewHistory.index > 0,
+      previewCanGoForward: previewHistory.index >= 0 && previewHistory.index < previewHistory.entries.length - 1,
     };
     target.innerHTML = `${renderWebAppBody(renderState)}${renderDialog(state, uiState)}`;
 
@@ -491,6 +1490,22 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
       });
     }
 
+    for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-preview-mode]"))) {
+      button.addEventListener("click", () => {
+        const mode = button.dataset.previewMode as PreviewMode | undefined;
+
+        if (!mode || mode === uiState.previewMode) {
+          return;
+        }
+
+        uiState = {
+          ...uiState,
+          previewMode: mode,
+        };
+        render();
+      });
+    }
+
     for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-file-path]"))) {
       button.addEventListener("click", () => {
         if (button.dataset.diffActionId) {
@@ -509,6 +1524,165 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
         render();
       });
     }
+
+    const previewFrame = target.querySelector<HTMLIFrameElement>("[data-preview-frame]");
+    const previewUrlInput = target.querySelector<HTMLInputElement>("[data-preview-url-input]");
+    const workspacePathInput = target.querySelector<HTMLInputElement>("[data-workspace-path-input]");
+
+    previewFrame?.addEventListener("load", () => {
+      let nextUrl = previewFrame.src;
+
+      try {
+        previewFrame.contentWindow?.scrollTo(0, 0);
+      } catch {
+        // Ignore cross-origin or unavailable scroll access.
+      }
+
+      try {
+        nextUrl = previewFrame.contentWindow?.location.href ?? nextUrl;
+      } catch {
+        nextUrl = previewFrame.src;
+      }
+
+      const normalized = normalizePreviewUrl(nextUrl);
+      if (!isUsablePreviewUrl(normalized)) {
+        uiState = {
+          ...uiState,
+          previewLoading: false,
+        };
+        return;
+      }
+
+      const currentEntry = previewHistory.entries[previewHistory.index];
+      if (currentEntry !== normalized) {
+        previewHistory = {
+          entries: [...previewHistory.entries.slice(0, previewHistory.index + 1), normalized],
+          index: previewHistory.index + 1,
+        };
+      }
+
+      const shouldRender =
+        uiState.previewLoading !== false || uiState.previewUrl !== normalized;
+
+      uiState = {
+        ...uiState,
+        previewLoading: false,
+      };
+
+      if (shouldRender) {
+        render();
+      }
+    });
+
+    target.querySelector<HTMLFormElement>("[data-preview-form]")?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const nextUrl = normalizePreviewUrl(previewUrlInput?.value ?? "");
+
+      if (!nextUrl) {
+        return;
+      }
+
+      previewHistory = {
+        entries: [...previewHistory.entries.slice(0, previewHistory.index + 1), nextUrl],
+        index: previewHistory.index + 1,
+      };
+      uiState = {
+        ...uiState,
+        previewUrl: nextUrl,
+        previewAddress: nextUrl,
+        previewLoading: true,
+      };
+      render();
+    });
+
+    target.querySelector<HTMLFormElement>("[data-workspace-path-form]")?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const nextPath = workspacePathInput?.value.trim();
+
+      if (!nextPath) {
+        return;
+      }
+
+      uiState = {
+        ...uiState,
+        workspaceRoot: nextPath,
+      };
+      render();
+    });
+
+    for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-preview-nav]"))) {
+      const action = button.dataset.previewNav;
+      const disabled =
+        (action === "back" && previewHistory.index <= 0) ||
+        (action === "forward" && previewHistory.index >= previewHistory.entries.length - 1);
+
+      button.disabled = disabled;
+
+      button.addEventListener("click", () => {
+        if (action === "back") {
+          if (previewHistory.index <= 0) {
+            return;
+          }
+
+          previewHistory = {
+            ...previewHistory,
+            index: previewHistory.index - 1,
+          };
+          const nextPreviewUrl = previewHistory.entries[previewHistory.index];
+          uiState = {
+            ...uiState,
+            ...(nextPreviewUrl ? { previewUrl: nextPreviewUrl } : {}),
+            ...(nextPreviewUrl ? { previewAddress: nextPreviewUrl } : {}),
+            previewLoading: true,
+          };
+          render();
+          return;
+        }
+
+        if (action === "forward") {
+          if (previewHistory.index >= previewHistory.entries.length - 1) {
+            return;
+          }
+
+          previewHistory = {
+            ...previewHistory,
+            index: previewHistory.index + 1,
+          };
+          const nextPreviewUrl = previewHistory.entries[previewHistory.index];
+          uiState = {
+            ...uiState,
+            ...(nextPreviewUrl ? { previewUrl: nextPreviewUrl } : {}),
+            ...(nextPreviewUrl ? { previewAddress: nextPreviewUrl } : {}),
+            previewLoading: true,
+          };
+          render();
+          return;
+        }
+
+        if (action === "reload") {
+          if (!previewFrame) {
+            return;
+          }
+
+          const currentUrl = previewHistory.entries[previewHistory.index] ?? uiState.previewUrl;
+          uiState = {
+            ...uiState,
+            previewLoading: true,
+          };
+          previewFrame.src = currentUrl ?? previewFrame.src;
+        }
+      });
+    }
+
+    target.querySelector<HTMLButtonElement>("[data-preview-open]")?.addEventListener("click", () => {
+      const url = normalizePreviewUrl(previewUrlInput?.value ?? "");
+
+      if (!url) {
+        return;
+      }
+
+      window.open(normalizePreviewUrl(url), "_blank", "noopener,noreferrer");
+    });
 
     const form = target.querySelector<HTMLFormElement>('[data-editor-form="interactive-web-editor"]');
 
@@ -615,6 +1789,10 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
         }
       });
     }
+
+    target.querySelector<HTMLButtonElement>("[data-go-home]")?.addEventListener("click", () => {
+      goHome();
+    });
 
     for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-open-dialog]"))) {
       button.addEventListener("click", () => {
@@ -745,6 +1923,8 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
 async function mount(): Promise<void> {
   ensureStyles(document);
   clearEphemeralStyles();
+  cleanupLauncherEffects?.();
+  cleanupLauncherEffects = undefined;
 
   const sessionId = getSessionIdFromLocation(window.location);
 

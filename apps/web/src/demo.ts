@@ -7,6 +7,7 @@ import {
   type InteractiveWebEditRequest,
   type WebAppBootstrap,
 } from "./index";
+import { getDefaultWorkspaceSnapshot } from "./workspace";
 
 export interface DemoSessionDefinition {
   id: string;
@@ -88,6 +89,7 @@ export function getDemoSessionDefinition(sessionId: string): DemoSessionDefiniti
 
 export async function createDemoBootstrap(sessionId = "club-promo"): Promise<WebAppBootstrap> {
   const definition = getDemoSessionDefinition(sessionId);
+  const workspace = getDefaultWorkspaceSnapshot();
 
   const baseEvents: AgentEvent[] = [
     {
@@ -177,7 +179,9 @@ export async function createDemoBootstrap(sessionId = "club-promo"): Promise<Web
   const dropMessageIds = new Set(
     agentEvents
       .filter(
-        (event) =>
+        (
+          event,
+        ): event is Extract<AgentEvent, { type: "message.delta" }> =>
           event.type === "message.delta" &&
           /Bolt|Planner is translating|Update page block/i.test(event.text),
       )
@@ -198,6 +202,8 @@ export async function createDemoBootstrap(sessionId = "club-promo"): Promise<Web
     initialEvents: [...baseEvents, ...cleanedAgentEvents],
     sessionId: `${definition.id}-session`,
     projectId: `${definition.id}-project`,
+    workspaceRoot: workspace.rootPath,
+    workspaceFiles: workspace.files,
     webEditor,
   };
 }

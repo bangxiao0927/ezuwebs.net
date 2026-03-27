@@ -5,6 +5,7 @@ import {
   workspacePanelLabels,
 } from "@ezu/ui";
 import { type ActionState, type AgentEvent, type PendingInteraction } from "@ezu/protocol";
+import { type WorkspaceFileEntry } from "./workspace";
 
 export { createReplacementPrompt } from "./replacement.js";
 
@@ -22,14 +23,23 @@ export interface WebAppBootstrap {
   initialEvents: AgentEvent[];
   sessionId: string;
   projectId: string;
+  workspaceRoot?: string;
+  workspaceFiles?: WorkspaceFileEntry[];
   webEditor?: Partial<InteractiveWebEditorState>;
   selectedDiffActionId?: string;
   composerText?: string;
   activeFile?: string;
   viewMode?: ViewMode;
+  previewMode?: PreviewMode;
+  previewUrl?: string;
+  previewAddress?: string;
+  previewCanGoBack?: boolean;
+  previewCanGoForward?: boolean;
+  previewLoading?: boolean;
 }
 
 export type ViewMode = "preview" | "code" | "diff";
+export type PreviewMode = "runtime" | "review";
 
 export interface WorkbenchViewModel {
   chatMessages: Array<{ id: string; role: string; content: string }>;
@@ -640,12 +650,7 @@ function renderDiffPanel(workbench: WorkbenchViewModel): string {
   `;
 }
 
-function renderEditorCode(workbench: WorkbenchViewModel): string {
-  const content =
-    workbench.selectedDiffAction?.action.patch ??
-    workbench.selectedBlock?.html ??
-    workbench.webEditor.suggestedPrompt ??
-    "No editor content available yet.";
+function renderEditorCode(content: string): string {
   const lines = content.split("\n");
 
   return `
@@ -690,29 +695,70 @@ function renderSessionTerminal(workbench: WorkbenchViewModel): string {
     .join("");
 }
 
-function renderSessionPreview(workbench: WorkbenchViewModel): string {
+function renderSessionPreview(
+  workbench: WorkbenchViewModel,
+  options: {
+    previewUrl?: string;
+    previewAddress?: string;
+    canGoBack?: boolean;
+    canGoForward?: boolean;
+    loading?: boolean;
+  } = {},
+): string {
   const activePreview = workbench.previews[workbench.previews.length - 1];
+  const resolvedPreviewUrl = options.previewUrl ?? activePreview?.url;
 
-  if (!activePreview) {
+  if (!resolvedPreviewUrl) {
     return `<div class="empty-state dark-empty">No live preview yet</div>`;
   }
 
   return `
     <div class="browser-frame">
       <div class="browser-toolbar">
-        <div class="browser-dots">
-          <span></span>
-          <span></span>
-          <span></span>
+        <div class="browser-actions">
+          <button class="browser-action" data-preview-nav="back" type="button" aria-label="Go back" ${options.canGoBack ? "" : "disabled"}>←</button>
+          <button class="browser-action" data-preview-nav="forward" type="button" aria-label="Go forward" ${options.canGoForward ? "" : "disabled"}>→</button>
+          <button class="browser-action" data-preview-nav="reload" type="button" aria-label="Reload">↻</button>
         </div>
-        <div class="browser-url">${escapeHtml(activePreview.url)}</div>
+        <form class="browser-url-form" data-preview-form>
+          <input
+            class="browser-url"
+            data-preview-url-input
+            name="url"
+            value="${escapeHtml(options.previewAddress ?? resolvedPreviewUrl)}"
+            spellcheck="false"
+            autocomplete="off"
+            placeholder="https://example.com"
+          />
+        </form>
+        <button class="browser-action" data-preview-open type="button" aria-label="Open in new tab">↗</button>
+      </div>
+      <div class="browser-loading ${options.loading ? "browser-loading-active" : ""}">
+        <span></span>
       </div>
       <iframe
         class="preview-frame"
-        src="${escapeHtml(activePreview.url)}"
+        data-preview-frame
+        src="${escapeHtml(resolvedPreviewUrl)}"
         title="Live browser runtime preview"
         loading="lazy"
       ></iframe>
+    </div>
+  `;
+}
+
+function renderSelectedFileCode(filePath: string, content: string): string {
+  return `
+    <div class="stack">
+      <div class="card diff-header">
+        <p class="eyebrow">Selected File</p>
+        <h3>${escapeHtml(filePath)}</h3>
+        <p>Code view for the current file selection.</p>
+      </div>
+      <div class="card code-block">
+        <p class="eyebrow">Source</p>
+        ${renderEditorCode(content)}
+      </div>
     </div>
   `;
 }
@@ -771,20 +817,20 @@ function renderChatMessages(workbench: WorkbenchViewModel): string {
 export const webAppStyles = `
   :root {
     color-scheme: dark;
-    --bg: #0c0f14;
-    --bg-top: #0b0d12;
-    --panel: #12161d;
-    --panel-2: #171c24;
-    --panel-3: #0f1319;
-    --surface: #1b212b;
-    --surface-2: #202735;
-    --line: rgba(255, 255, 255, 0.08);
-    --line-strong: rgba(255, 255, 255, 0.14);
-    --text: #eef2ff;
-    --muted: #9aa4b2;
-    --dim: #7f8997;
-    --accent: #4f8cff;
-    --accent-soft: rgba(79, 140, 255, 0.16);
+    --bg: #060816;
+    --bg-top: #08101d;
+    --panel: #0d1422;
+    --panel-2: #101a2a;
+    --panel-3: #0a111d;
+    --surface: #131d2d;
+    --surface-2: #1a2436;
+    --line: rgba(171, 212, 255, 0.12);
+    --line-strong: rgba(171, 212, 255, 0.24);
+    --text: #f5f7fb;
+    --muted: #94a7c2;
+    --dim: #70819b;
+    --accent: #7cc4ff;
+    --accent-soft: rgba(124, 196, 255, 0.14);
     --success: #4ade80;
     --danger: #f87171;
     --shadow: 0 28px 90px rgba(0, 0, 0, 0.42);
@@ -797,13 +843,15 @@ export const webAppStyles = `
   html,
   body {
     margin: 0;
+    height: 100%;
     min-height: 100%;
     background:
-      radial-gradient(circle at top left, rgba(79, 140, 255, 0.12), transparent 24%),
-      radial-gradient(circle at top right, rgba(45, 212, 191, 0.08), transparent 20%),
-      linear-gradient(180deg, #0a0c11 0%, #0c0f14 100%);
+      radial-gradient(circle at top left, rgba(124, 196, 255, 0.14), transparent 24%),
+      radial-gradient(circle at top right, rgba(124, 196, 255, 0.08), transparent 20%),
+      linear-gradient(180deg, #060816 0%, #09111d 100%);
     color: var(--text);
     font-family: Inter, "Segoe UI", sans-serif;
+    overflow: hidden;
   }
 
   a {
@@ -819,18 +867,22 @@ export const webAppStyles = `
   }
 
   .app-shell {
+    height: 100vh;
+    height: 100dvh;
     min-height: 100vh;
     padding: 0;
   }
 
   .workspace-shell {
+    height: calc(100vh - 28px);
+    height: calc(100dvh - 28px);
     min-height: calc(100vh - 28px);
     display: grid;
     grid-template-rows: auto 1fr;
     border: 0;
     border-radius: 0;
     overflow: hidden;
-    background: rgba(10, 12, 17, 0.9);
+    background: rgba(6, 8, 22, 0.94);
     box-shadow: none;
   }
 
@@ -841,7 +893,7 @@ export const webAppStyles = `
     gap: 18px;
     padding: 12px 16px;
     border-bottom: 1px solid var(--line);
-    background: rgba(18, 21, 28, 0.96);
+    background: rgba(13, 20, 34, 0.96);
   }
 
   .workspace-topbar,
@@ -875,13 +927,24 @@ export const webAppStyles = `
 
   .toolbar-chip-active {
     background: var(--accent-soft);
-    border-color: rgba(79, 140, 255, 0.5);
+    border-color: rgba(124, 196, 255, 0.5);
     color: #dbe7ff;
   }
 
   .brand-mark {
     font-style: italic;
     font-weight: 800;
+  }
+
+  .brand-home {
+    padding: 0;
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .brand-home:hover {
+    border-color: rgba(124, 196, 255, 0.5);
+    background: var(--accent-soft);
   }
 
   .topbar-title {
@@ -907,8 +970,8 @@ export const webAppStyles = `
   }
 
   .topbar-button-primary {
-    background: #f6f7fb;
-    color: #111827;
+    background: #7cc4ff;
+    color: #08101d;
     font-weight: 600;
   }
 
@@ -986,9 +1049,102 @@ export const webAppStyles = `
 
   .preview-shell {
     display: grid;
-    grid-template-rows: auto 1fr;
+    grid-template-columns: minmax(280px, 0.32fr) minmax(0, 1fr);
     min-height: 0;
     background: var(--panel-3);
+  }
+
+  .workbench-sidebar {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    min-height: 0;
+    border-right: 1px solid var(--line);
+    background: rgba(11, 17, 29, 0.94);
+  }
+
+  .workbench-sidebar-header {
+    padding: 10px 12px 8px;
+    border-bottom: 1px solid var(--line);
+    display: grid;
+    gap: 8px;
+  }
+
+  .workspace-path-form {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .workspace-path-input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    border-radius: 8px;
+    padding: 6px 8px;
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.03);
+    font-size: 0.86rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    outline: none;
+  }
+
+  .workspace-path-input::placeholder {
+    color: var(--dim);
+  }
+
+  .workspace-path-input:focus {
+    background: rgba(124, 196, 255, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(124, 196, 255, 0.28);
+  }
+
+  .workbench-sidebar-body {
+    padding: 10px 8px;
+    overflow: auto;
+    display: grid;
+    gap: 12px;
+  }
+
+  .sidebar-section {
+    display: grid;
+    gap: 10px;
+  }
+
+  .sidebar-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .sidebar-section-head strong {
+    color: var(--text);
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .file-tree {
+    display: grid;
+    gap: 2px;
+  }
+
+  .file-entry {
+    width: 100%;
+    text-align: left;
+    border: 0;
+    border-radius: 8px;
+    padding: 6px 8px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 0.86rem;
+  }
+
+  .file-entry:hover,
+  .file-entry-active {
+    background: rgba(124, 196, 255, 0.08);
+    color: var(--text);
   }
 
   .preview-topbar {
@@ -996,9 +1152,14 @@ export const webAppStyles = `
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 12px 16px;
+    padding: 8px 12px;
     border-bottom: 1px solid var(--line);
     background: rgba(18, 21, 28, 0.96);
+  }
+
+  .preview-topbar strong {
+    font-size: 0.88rem;
+    color: var(--text);
   }
 
   .preview-tabs {
@@ -1023,20 +1184,42 @@ export const webAppStyles = `
   }
 
   .preview-body {
-    padding: 16px;
-    overflow: auto;
+    min-height: 0;
+    padding: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .workspace-shell[data-view-mode="preview"] .preview-body {
+    padding: 0;
+    overflow: hidden;
   }
 
   .workspace-shell[data-view-mode="preview"] .preview-panel,
-  .workspace-shell[data-view-mode="code"] .code-panel,
-  .workspace-shell[data-view-mode="diff"] .diff-panel {
-    display: block;
+  .workspace-shell[data-view-mode="code"] .code-panel {
+    display: grid;
   }
 
   .preview-panel,
-  .code-panel,
-  .diff-panel {
+  .code-panel {
     display: none;
+    min-height: 0;
+  }
+
+  .preview-panel {
+    height: 100%;
+  }
+
+  .preview-panel-runtime {
+    overflow: hidden;
+  }
+
+  .preview-panel-review {
+    height: auto;
+    overflow: auto;
+    align-content: start;
+    padding: 16px;
+    background: #11161d;
   }
 
   .eyebrow {
@@ -1502,56 +1685,117 @@ export const webAppStyles = `
 
   .browser-frame {
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    height: 100%;
     min-height: 0;
-    padding: 14px;
-    gap: 12px;
+    gap: 0;
   }
 
   .browser-toolbar {
     display: flex;
     align-items: center;
     gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(13, 20, 34, 0.92);
   }
 
-  .browser-dots {
+  .browser-actions {
     display: flex;
     gap: 8px;
   }
 
-  .browser-dots span {
-    width: 10px;
-    height: 10px;
+  .browser-action {
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--line);
     border-radius: 999px;
-    background: #5f6b7b;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .browser-action:hover {
+    border-color: var(--line-strong);
+    background: var(--accent-soft);
+  }
+
+  .browser-action:disabled {
+    cursor: not-allowed;
+    opacity: 0.42;
+    color: var(--dim);
+    background: rgba(255, 255, 255, 0.02);
+    border-color: var(--line);
+  }
+
+  .browser-url-form {
+    flex: 1;
   }
 
   .browser-url {
-    flex: 1;
+    width: 100%;
+    min-width: 0;
     border: 1px solid var(--line);
     border-radius: 999px;
     padding: 8px 12px;
-    color: var(--muted);
+    color: var(--text);
     background: #161c25;
     font-size: 0.85rem;
+    outline: none;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
+  .browser-url::placeholder {
+    color: var(--dim);
+  }
+
+  .browser-url:focus {
+    border-color: rgba(124, 196, 255, 0.4);
+    box-shadow: 0 0 0 3px rgba(124, 196, 255, 0.08);
+  }
+
+  .browser-loading {
+    height: 2px;
+    background: rgba(255, 255, 255, 0.04);
+    overflow: hidden;
+  }
+
+  .browser-loading span {
+    display: block;
+    width: 22%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, #7cc4ff, transparent);
+    opacity: 0;
+    transform: translateX(-120%);
+  }
+
+  .browser-loading-active span {
+    opacity: 1;
+    animation: browser-loading-slide 1s linear infinite;
+  }
+
+  @keyframes browser-loading-slide {
+    from {
+      transform: translateX(-120%);
+    }
+
+    to {
+      transform: translateX(520%);
+    }
+  }
+
   .preview-frame {
     width: 100%;
     height: 100%;
-    min-height: 320px;
-    border: 1px solid var(--line);
-    border-radius: 14px;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
     background: white;
-  }
-
-  .preview-controls {
-    display: grid;
-    gap: 10px;
-    padding: 0 14px 14px;
   }
 
   .preview-stack {
@@ -1729,6 +1973,15 @@ export const webAppStyles = `
     }
 
     .preview-shell {
+      grid-template-columns: 1fr;
+    }
+
+    .workbench-sidebar {
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .preview-shell {
       min-height: 60vh;
     }
 
@@ -1744,10 +1997,14 @@ export const webAppStyles = `
 
   @media (max-width: 720px) {
     .app-shell {
+      height: 100vh;
+      height: 100dvh;
       padding: 0;
     }
 
     .workspace-shell {
+      height: 100vh;
+      height: 100dvh;
       min-height: 100vh;
       border-radius: 0;
     }
@@ -1771,27 +2028,28 @@ export const webAppStyles = `
 export function renderWebAppBody(input: WebAppBootstrap): string {
   const shell = createWebAppShell(input);
   const { workbench } = shell;
-  const uniqueFiles = [
-    ...new Set([
-      "src",
-      ...(workbench.files.length > 0 ? workbench.files : ["src/App.tsx", "src/index.css", "main.tsx"]),
-      ...(workbench.selectedBlockFile ? [workbench.selectedBlockFile] : []),
-    ]),
-  ];
+  const workspaceFileMap = new Map(
+    (input.workspaceFiles ?? []).map((file) => [file.path, file.content]),
+  );
+  const uniqueFiles = [...new Set(workspaceFileMap.keys())];
   const activeFile =
     input.activeFile ??
-    workbench.selectedDiffAction?.action.path ??
     workbench.selectedBlockFile ??
     uniqueFiles[0] ??
-    "src/App.tsx";
+    "apps/web/src/main.ts";
+  const activeFileContent =
+    workspaceFileMap.get(activeFile) ??
+    `// ${activeFile}\n\nNo file content is available for this workspace path yet.`;
   const viewMode: ViewMode = input.viewMode ?? "preview";
+  const previewMode: PreviewMode = input.previewMode ?? "runtime";
+  const workspaceRoot = input.workspaceRoot ?? "/Users/bangxiao/Documents/ezuwebs.net";
 
   return `
     <main class="app-shell">
       <div class="workspace-shell" data-view-mode="${escapeHtml(viewMode)}">
         <header class="workspace-topbar">
           <div class="topbar-left">
-            <div class="brand-mark">EZ</div>
+            <button class="brand-mark brand-home" data-go-home type="button" aria-label="Back to homepage">EZ</button>
             <div class="avatar">E</div>
             <div class="topbar-crumbs">
               <span class="topbar-title">${escapeHtml(shell.topBar.projectName)}</span>
@@ -1846,58 +2104,91 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
           </aside>
 
           <section class="preview-shell">
-            <div class="preview-topbar">
-              <div>
-                <p class="eyebrow">Workspace</p>
-                <strong>${escapeHtml(activeFile.replace(/\//g, " > "))}</strong>
+            <aside class="workbench-sidebar">
+              <div class="workbench-sidebar-header">
+                <form class="workspace-path-form" data-workspace-path-form>
+                  <p class="eyebrow">Workspace Path</p>
+                  <input
+                    class="workspace-path-input"
+                    data-workspace-path-input
+                    name="path"
+                    value="${escapeHtml(workspaceRoot)}"
+                    spellcheck="false"
+                    autocomplete="off"
+                  />
+                </form>
               </div>
-              <div class="preview-tabs">
-                <button
-                  class="preview-tab ${viewMode === "preview" ? "preview-tab-active" : ""}"
-                  data-toolbar-action="preview"
-                  type="button"
-                >Preview</button>
-                <button
-                  class="preview-tab ${viewMode === "code" ? "preview-tab-active" : ""}"
-                  data-toolbar-action="code"
-                  type="button"
-                >Code</button>
-                <button
-                  class="preview-tab ${viewMode === "diff" ? "preview-tab-active" : ""}"
-                  data-toolbar-action="diff"
-                  type="button"
-                >Diff</button>
-              </div>
-            </div>
-            <div class="preview-body">
-              <div class="preview-panel">
-                ${renderSessionPreview(workbench)}
-                <div class="preview-controls">
-                  <div class="preview-stack">
-                    ${workbench.webEditor.blocks
+              <div class="workbench-sidebar-body">
+                <section class="sidebar-section">
+                  <div class="sidebar-section-head">
+                    <strong>Filesystem</strong>
+                  </div>
+                  <div class="file-tree">
+                    ${uniqueFiles
                       .map(
-                        (block) => `
+                        (filePath) => `
                           <button
                             type="button"
-                            class="preview-block ${block.id === workbench.webEditor.selectedBlockId ? "preview-block-active" : ""}"
-                            data-preview-block-id="${escapeHtml(block.id)}"
+                            class="file-entry ${filePath === activeFile ? "file-entry-active" : ""}"
+                            data-file-path="${escapeHtml(filePath)}"
                           >
-                            <span class="preview-block-label">${escapeHtml(block.label)}</span>
-                            <span class="preview-block-path">${escapeHtml(block.selector)}</span>
+                            ${escapeHtml(filePath)}
                           </button>
                         `,
                       )
                       .join("")}
                   </div>
+                </section>
+                <section class="sidebar-section">
+                  <div class="sidebar-section-head">
+                    <strong>Code</strong>
+                  </div>
+                  <div class="code-panel">
+                    ${renderEditorCode(activeFileContent)}
+                  </div>
+                </section>
+              </div>
+            </aside>
+            <section class="preview-body">
+              <div class="preview-topbar">
+                <div class="preview-tabs" role="tablist" aria-label="Workbench panel mode">
+                  <button
+                    class="preview-tab ${previewMode === "runtime" ? "preview-tab-active" : ""}"
+                    data-preview-mode="runtime"
+                    type="button"
+                  >
+                    Runtime Preview
+                  </button>
+                  <button
+                    class="preview-tab ${previewMode === "review" ? "preview-tab-active" : ""}"
+                    data-preview-mode="review"
+                    type="button"
+                  >
+                    Code Review
+                  </button>
                 </div>
+                <strong>${escapeHtml(activeFile)}</strong>
               </div>
-              <div class="code-panel">
-                ${renderEditorCode(workbench)}
+              <div class="preview-panel ${previewMode === "runtime" ? "preview-panel-runtime" : "preview-panel-review"}">
+                ${
+                  previewMode === "runtime"
+                    ? renderSessionPreview(workbench, {
+                        ...(input.previewUrl ? { previewUrl: input.previewUrl } : {}),
+                        ...(input.previewAddress ? { previewAddress: input.previewAddress } : {}),
+                        ...(typeof input.previewCanGoBack === "boolean"
+                          ? { canGoBack: input.previewCanGoBack }
+                          : {}),
+                        ...(typeof input.previewCanGoForward === "boolean"
+                          ? { canGoForward: input.previewCanGoForward }
+                          : {}),
+                        ...(typeof input.previewLoading === "boolean"
+                          ? { loading: input.previewLoading }
+                          : {}),
+                      })
+                    : renderSelectedFileCode(activeFile, activeFileContent)
+                }
               </div>
-              <div class="diff-panel">
-                ${renderDiffPanel(workbench)}
-              </div>
-            </div>
+            </section>
           </section>
         </section>
       </div>

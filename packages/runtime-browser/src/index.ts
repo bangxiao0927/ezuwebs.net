@@ -24,30 +24,117 @@ function renderRuntimePreviewDocument(input: {
 }): string {
   const latestFile = input.files.at(-1);
   const latestContent = latestFile?.content ?? "No file content has been written into the browser container yet.";
-  const clubNames = [...latestContent.matchAll(/name:\s*['"]([^'"]+)['"]/g)]
-    .map((match) => match[1])
-    .filter((name): name is string => Boolean(name))
-    .slice(0, 4);
-  const previewCards =
-    clubNames.length > 0
-      ? clubNames
-          .map(
-            (name, index) => `
-              <article class="preview-card">
-                <span class="badge">0${String(index + 1)}</span>
-                <strong>${escapeHtml(name)}</strong>
-                <p>Generated from the current virtual file system payload.</p>
-              </article>
-            `,
-          )
-          .join("")
-      : `
-        <article class="preview-card">
-          <span class="badge">01</span>
-          <strong>Runtime Preview</strong>
-          <p>Write or patch a file and the preview surface updates immediately.</p>
-        </article>
-      `;
+  const latestPath = latestFile?.path ?? "No active file";
+  const lines = latestContent.length === 0 ? 0 : latestContent.split("\n").length;
+  const imports = [...latestContent.matchAll(/^\s*import\s/mg)].length;
+  const exports = [...latestContent.matchAll(/^\s*export\s/mg)].length;
+  const isHtmlLike =
+    /\.html?$/i.test(latestPath) || /^\s*<!doctype html>|^\s*<html[\s>]|^\s*<main[\s>]/i.test(latestContent.trim());
+  const previewSource = isHtmlLike
+    ? latestContent
+    : `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #06101c;
+        --panel: rgba(10, 19, 31, 0.92);
+        --line: rgba(124, 196, 255, 0.18);
+        --text: #f5f7fb;
+        --muted: #8fa5c0;
+        --accent: #7cc4ff;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(124, 196, 255, 0.18), transparent 24%),
+          linear-gradient(180deg, #040812 0%, var(--bg) 100%);
+      }
+      main {
+        min-height: 100vh;
+        padding: 24px;
+        display: grid;
+        gap: 16px;
+        align-content: start;
+      }
+      .card {
+        padding: 18px;
+        border-radius: 20px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+      }
+      .eyebrow {
+        margin: 0 0 8px;
+        color: var(--accent);
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+      h1, p, pre { margin: 0; }
+      p {
+        color: var(--muted);
+        line-height: 1.6;
+      }
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 10px;
+      }
+      .metric {
+        padding: 12px 14px;
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .metric strong,
+      .metric span {
+        display: block;
+      }
+      .metric strong {
+        font-size: 11px;
+        color: var(--muted);
+        text-transform: uppercase;
+      }
+      .metric span {
+        margin-top: 8px;
+      }
+      pre {
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="card">
+        <p class="eyebrow">Browser Runtime</p>
+        <h1>${escapeHtml(latestPath)}</h1>
+        <p>This file is active in the browser runtime. The preview summarizes structure when the payload is not directly renderable HTML.</p>
+      </section>
+      <section class="card metrics">
+        <article class="metric"><strong>Port</strong><span>${escapeHtml(String(input.port))}</span></article>
+        <article class="metric"><strong>Lines</strong><span>${escapeHtml(String(lines))}</span></article>
+        <article class="metric"><strong>Imports</strong><span>${escapeHtml(String(imports))}</span></article>
+        <article class="metric"><strong>Exports</strong><span>${escapeHtml(String(exports))}</span></article>
+      </section>
+      <section class="card">
+        <p class="eyebrow">Source Sample</p>
+        <pre>${escapeHtml(latestContent.split("\n").slice(0, 18).join("\n"))}</pre>
+      </section>
+    </main>
+  </body>
+</html>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -115,7 +202,7 @@ function renderRuntimePreviewDocument(input: {
       .grid {
         display: grid;
         gap: 18px;
-        grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+        grid-template-columns: minmax(280px, 0.7fr) minmax(0, 1.3fr);
       }
 
       .list {
@@ -191,59 +278,44 @@ function renderRuntimePreviewDocument(input: {
         background: linear-gradient(180deg, #151b24, #10141b);
       }
 
-      .preview-grid {
+      .metrics {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 10px;
         margin-top: 14px;
       }
 
-      .preview-card {
-        padding: 16px;
-        border-radius: 18px;
+      .metric {
+        padding: 14px 16px;
+        border-radius: 16px;
         border: 1px solid var(--line);
         background: rgba(255, 255, 255, 0.03);
       }
 
-      .preview-card strong,
-      .preview-card p,
-      .badge {
+      .metric strong,
+      .metric span {
         display: block;
       }
 
-      .preview-card p {
-        margin-top: 8px;
+      .metric strong {
         color: var(--muted);
-      }
-
-      .badge {
-        margin-bottom: 8px;
-        color: var(--accent);
-        font-size: 12px;
-        font-weight: 700;
+        font-size: 11px;
+        text-transform: uppercase;
         letter-spacing: 0.08em;
       }
 
+      .metric span {
+        margin-top: 8px;
+        word-break: break-word;
+      }
+
       .preview-stage {
-        min-height: 220px;
+        width: 100%;
+        min-height: 460px;
         margin-top: 16px;
         border-radius: 18px;
         border: 1px solid var(--line);
-        background:
-          radial-gradient(circle at top left, rgba(79, 140, 255, 0.18), transparent 25%),
-          linear-gradient(180deg, #ffffff 0%, #eef2f8 100%);
-        color: #111827;
-        padding: 20px;
-      }
-
-      .preview-stage h3,
-      .preview-stage p {
-        margin: 0;
-      }
-
-      .preview-stage p {
-        margin-top: 10px;
-        color: #4b5563;
+        background: #ffffff;
       }
 
       @media (max-width: 720px) {
@@ -293,23 +365,31 @@ function renderRuntimePreviewDocument(input: {
               <div class="browser-url">browser-runtime://preview:${escapeHtml(String(input.port))}</div>
             </div>
             <div class="viewport-frame">
-              <h3>${escapeHtml(latestFile?.path ?? "No active file")}</h3>
+              <h3>${escapeHtml(latestPath)}</h3>
               <p>${escapeHtml(
                 latestFile
                   ? "Latest runtime artifact mirrored into the preview surface."
                   : "Once an action writes or patches a file, its content appears here.",
               )}</p>
-              <div class="preview-grid">
-                ${previewCards}
+              <div class="metrics">
+                <article class="metric">
+                  <strong>Port</strong>
+                  <span>${escapeHtml(String(input.port))}</span>
+                </article>
+                <article class="metric">
+                  <strong>Lines</strong>
+                  <span>${escapeHtml(String(lines))}</span>
+                </article>
+                <article class="metric">
+                  <strong>Imports</strong>
+                  <span>${escapeHtml(String(imports))}</span>
+                </article>
+                <article class="metric">
+                  <strong>Exports</strong>
+                  <span>${escapeHtml(String(exports))}</span>
+                </article>
               </div>
-              <div class="preview-stage">
-                <p class="eyebrow">App Preview</p>
-                <h3>${escapeHtml(clubNames[0] ?? "Interactive browser preview")}</h3>
-                <p>
-                  This pane is generated from the virtual file system state, giving the session a fast
-                  embedded preview without leaving the workbench.
-                </p>
-              </div>
+              <iframe class="preview-stage" srcdoc="${escapeHtml(previewSource)}" title="Browser runtime preview"></iframe>
             </div>
           </div>
           <pre>${escapeHtml(latestContent)}</pre>
