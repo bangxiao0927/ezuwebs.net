@@ -56,9 +56,9 @@ uniform vec2 uMouse;
 
 #define PI 3.1415926538
 
-const int u_line_count = 40;
-const float u_line_width = 7.0;
-const float u_line_blur = 10.0;
+const int u_line_count = 28;
+const float u_line_width = 4.0;
+const float u_line_blur = 6.0;
 
 float Perlin2D(vec2 P) {
     vec2 Pi = floor(P);
@@ -201,7 +201,7 @@ function mountLauncherThreads(target: HTMLElement): () => void {
   const canvas = document.createElement("canvas");
   const gl = canvas.getContext("webgl", {
     alpha: true,
-    antialias: true,
+    antialias: false,
     premultipliedAlpha: true,
   });
 
@@ -253,7 +253,7 @@ function mountLauncherThreads(target: HTMLElement): () => void {
   const resize = () => {
     const width = Math.max(1, Math.floor(target.clientWidth));
     const height = Math.max(1, Math.floor(target.clientHeight));
-    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
 
     canvas.width = Math.floor(width * ratio);
     canvas.height = Math.floor(height * ratio);
@@ -286,9 +286,14 @@ function mountLauncherThreads(target: HTMLElement): () => void {
   target.addEventListener("mouseleave", handleMouseLeave);
 
   let frameId = 0;
+  let lastRenderTime = 0;
 
   const renderFrame = (now: number) => {
     frameId = requestAnimationFrame(renderFrame);
+    if (document.hidden || now - lastRenderTime < 33) {
+      return;
+    }
+    lastRenderTime = now;
     gl.useProgram(program);
     currentMouseX += 0.05 * (targetMouseX - currentMouseX);
     currentMouseY += 0.05 * (targetMouseY - currentMouseY);
