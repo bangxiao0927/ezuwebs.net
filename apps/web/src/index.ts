@@ -747,6 +747,22 @@ function renderSessionPreview(
   `;
 }
 
+function renderSelectedFileCode(filePath: string, content: string): string {
+  return `
+    <div class="stack">
+      <div class="card diff-header">
+        <p class="eyebrow">Selected File</p>
+        <h3>${escapeHtml(filePath)}</h3>
+        <p>Code view for the current file selection.</p>
+      </div>
+      <div class="card code-block">
+        <p class="eyebrow">Source</p>
+        ${renderEditorCode(content)}
+      </div>
+    </div>
+  `;
+}
+
 function renderModelOutput(workbench: WorkbenchViewModel): string {
   const lastAssistant = [...workbench.chatMessages]
     .reverse()
@@ -2169,7 +2185,7 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
                           ? { loading: input.previewLoading }
                           : {}),
                       })
-                    : renderDiffPanel(workbench)
+                    : renderSelectedFileCode(activeFile, activeFileContent)
                 }
               </div>
             </section>
