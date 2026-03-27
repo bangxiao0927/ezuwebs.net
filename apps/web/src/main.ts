@@ -1333,7 +1333,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
     return files;
   };
 
-  const syncGeneratedPreview = () => {
+  const syncActiveFileSelection = () => {
     const files = buildWorkspaceFiles();
     const activePath =
       uiState.activeFile ??
@@ -1341,17 +1341,10 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
       createWorkbenchViewModel(state).selectedBlockFile ??
       [...files.keys()][0] ??
       "apps/web/src/main.ts";
-    const nextContent =
-      files.get(activePath) ??
-      `// ${activePath}\n\nNo file content is available for this workspace path yet.`;
-    const nextPreviewUrl = createWorkspacePreviewUrl(activePath, nextContent);
-    const nextPreviewAddress = `workspace://${activePath}`;
 
     uiState = {
       ...uiState,
       activeFile: activePath,
-      previewUrl: nextPreviewUrl,
-      previewAddress: nextPreviewAddress,
     };
   };
 
@@ -1379,6 +1372,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
       uiState = {
         ...uiState,
         previewUrl: resolvedUrl,
+        previewAddress: resolvedUrl,
       };
       return;
     }
@@ -1399,11 +1393,12 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
     uiState = {
       ...uiState,
       previewUrl: resolvedUrl,
+      previewAddress: resolvedUrl,
     };
   };
 
   const render = () => {
-    syncGeneratedPreview();
+    syncActiveFileSelection();
     syncPreviewHistory();
     state = {
       ...state,
