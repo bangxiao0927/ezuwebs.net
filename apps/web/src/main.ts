@@ -8,6 +8,7 @@ import {
   upsertInteractiveWebEditorProperty,
   webAppStyles,
   type InteractiveWebEditRequest,
+  type PreviewMode,
   type ViewMode,
   type WebAppBootstrap,
 } from "./index";
@@ -24,6 +25,7 @@ type UiState = {
   workspaceRoot?: string;
   activeFile?: string;
   viewMode: ViewMode;
+  previewMode: PreviewMode;
   previewUrl?: string;
   previewAddress?: string;
   previewLoading?: boolean;
@@ -1300,6 +1302,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
     composerText: state.composerText ?? "",
     workspaceRoot: state.workspaceRoot ?? defaultWorkspace.rootPath,
     viewMode: "preview",
+    previewMode: state.previewMode ?? "runtime",
   };
   let previewHistory: PreviewHistoryState = {
     entries: [],
@@ -1409,6 +1412,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
       ...(uiState.workspaceRoot ? { workspaceRoot: uiState.workspaceRoot } : {}),
       workspaceFiles: [...buildWorkspaceFiles()].map(([path, content]) => ({ path, content })),
       viewMode: uiState.viewMode,
+      previewMode: uiState.previewMode,
       ...(uiState.activeFile ? { activeFile: uiState.activeFile } : {}),
       ...(uiState.previewUrl ? { previewUrl: uiState.previewUrl } : {}),
       ...(uiState.previewAddress ? { previewAddress: uiState.previewAddress } : {}),
@@ -1476,6 +1480,22 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
         uiState = {
           ...uiState,
           viewMode: mode,
+        };
+        render();
+      });
+    }
+
+    for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-preview-mode]"))) {
+      button.addEventListener("click", () => {
+        const mode = button.dataset.previewMode as PreviewMode | undefined;
+
+        if (!mode || mode === uiState.previewMode) {
+          return;
+        }
+
+        uiState = {
+          ...uiState,
+          previewMode: mode,
         };
         render();
       });

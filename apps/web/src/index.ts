@@ -30,6 +30,7 @@ export interface WebAppBootstrap {
   composerText?: string;
   activeFile?: string;
   viewMode?: ViewMode;
+  previewMode?: PreviewMode;
   previewUrl?: string;
   previewAddress?: string;
   previewCanGoBack?: boolean;
@@ -38,6 +39,7 @@ export interface WebAppBootstrap {
 }
 
 export type ViewMode = "preview" | "code" | "diff";
+export type PreviewMode = "runtime" | "review";
 
 export interface WorkbenchViewModel {
   chatMessages: Array<{ id: string; role: string; content: string }>;
@@ -1192,6 +1194,18 @@ export const webAppStyles = `
     height: 100%;
   }
 
+  .preview-panel-runtime {
+    overflow: hidden;
+  }
+
+  .preview-panel-review {
+    height: auto;
+    overflow: auto;
+    align-content: start;
+    padding: 16px;
+    background: #11161d;
+  }
+
   .eyebrow {
     font-size: 12px;
     text-transform: uppercase;
@@ -2011,6 +2025,7 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
     workspaceFileMap.get(activeFile) ??
     `// ${activeFile}\n\nNo file content is available for this workspace path yet.`;
   const viewMode: ViewMode = input.viewMode ?? "preview";
+  const previewMode: PreviewMode = input.previewMode ?? "runtime";
   const workspaceRoot = input.workspaceRoot ?? "/Users/bangxiao/Documents/ezuwebs.net";
 
   return `
@@ -2120,23 +2135,42 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
             </aside>
             <section class="preview-body">
               <div class="preview-topbar">
-                <p class="eyebrow">Runtime Preview</p>
+                <div class="preview-tabs" role="tablist" aria-label="Workbench panel mode">
+                  <button
+                    class="preview-tab ${previewMode === "runtime" ? "preview-tab-active" : ""}"
+                    data-preview-mode="runtime"
+                    type="button"
+                  >
+                    Runtime Preview
+                  </button>
+                  <button
+                    class="preview-tab ${previewMode === "review" ? "preview-tab-active" : ""}"
+                    data-preview-mode="review"
+                    type="button"
+                  >
+                    Code Review
+                  </button>
+                </div>
                 <strong>${escapeHtml(activeFile)}</strong>
               </div>
-              <div class="preview-panel">
-                ${renderSessionPreview(workbench, {
-                  ...(input.previewUrl ? { previewUrl: input.previewUrl } : {}),
-                  ...(input.previewAddress ? { previewAddress: input.previewAddress } : {}),
-                  ...(typeof input.previewCanGoBack === "boolean"
-                    ? { canGoBack: input.previewCanGoBack }
-                    : {}),
-                  ...(typeof input.previewCanGoForward === "boolean"
-                    ? { canGoForward: input.previewCanGoForward }
-                    : {}),
-                  ...(typeof input.previewLoading === "boolean"
-                    ? { loading: input.previewLoading }
-                    : {}),
-                })}
+              <div class="preview-panel ${previewMode === "runtime" ? "preview-panel-runtime" : "preview-panel-review"}">
+                ${
+                  previewMode === "runtime"
+                    ? renderSessionPreview(workbench, {
+                        ...(input.previewUrl ? { previewUrl: input.previewUrl } : {}),
+                        ...(input.previewAddress ? { previewAddress: input.previewAddress } : {}),
+                        ...(typeof input.previewCanGoBack === "boolean"
+                          ? { canGoBack: input.previewCanGoBack }
+                          : {}),
+                        ...(typeof input.previewCanGoForward === "boolean"
+                          ? { canGoForward: input.previewCanGoForward }
+                          : {}),
+                        ...(typeof input.previewLoading === "boolean"
+                          ? { loading: input.previewLoading }
+                          : {}),
+                      })
+                    : renderDiffPanel(workbench)
+                }
               </div>
             </section>
           </section>
