@@ -109,7 +109,7 @@
 - updated_at
 
 说明：
-- `runtime_type` 决定这个项目默认跑在 WebContainer 还是远程 runtime。
+- `runtime_type` 决定这个项目默认跑在 browser runtime 还是远程 runtime。
 - `default_model_profile` 对应一套模型路由策略。
 
 --------------------------------

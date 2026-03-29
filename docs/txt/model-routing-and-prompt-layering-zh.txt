@@ -472,7 +472,7 @@ Summarizer 输出：
 - 告诉模型当前运行环境能力和限制
 
 例如：
-- 当前是 WebContainer
+- 当前是 browser runtime stub，或未来切换成 remote runtime
 - 可用命令列表
 - 不能跑原生二进制
 - 文件系统根目录
@@ -531,7 +531,7 @@ Summarizer 输出：
     summarizer.txt
 
   /runtime
-    webcontainer.txt
+    browser-runtime.txt
     remote-runtime.txt
 
   /tasks
