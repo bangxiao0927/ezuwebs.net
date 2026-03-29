@@ -3,6 +3,8 @@
 1. 目录结构 + 核心类型定义
 2. 第一版重构 MVP 的开发顺序
 
+这是一份重构方案草图，不是当前仓库实现说明。当前 repo 已经是 TypeScript monorepo，并且已经落地了 `apps/web`、`apps/agent`、`packages/protocol`、`packages/core`、`packages/model-gateway`、`packages/runtime-browser`、`packages/runtime-remote`、`packages/ui` 这些基础结构；本文更侧重下一版如何继续扩展和重构。
+
 目标不是解释当前 repo，而是给“重新实现这个网站核心功能并重构”的方案草图。重点是支持：
 - 多模型接入，比如 GPT、Codex
 - 更强的交互式设计
