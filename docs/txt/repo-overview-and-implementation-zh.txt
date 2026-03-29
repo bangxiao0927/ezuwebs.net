@@ -1,353 +1,295 @@
-这个文件不是逐文件解读，而是从更高一层说明整个 repo 的大体思路、设计目标、核心机制和实现路线。适合先建立全局认知，再回头看具体代码。
+这个文件从更高一层解释当前 repo 的目标、分层方式和实现重点。它描述的是“现在仓库里已经落地的东西”，不是过去那套 Remix + WebContainer 单应用方案。
 
-一、这个 repo 到底想解决什么问题
+====================
+一、这个 repo 现在到底要解决什么问题
+====================
 
-这个 repo 要解决的不是“做一个聊天 UI”，而是“做一个能在浏览器里直接完成项目生成、修改、运行和预览的 AI 编程环境”。
+这个 repo 当前要验证的，不是“如何把一个完整 AI 编程产品上线”，而是更基础但也更关键的问题：
 
-传统聊天型 AI 编程产品通常停留在：
-- 给代码建议
-- 输出代码片段
-- 回答问题
+1. agent、runtime、UI 之间应该用什么统一协议通信
+2. 一串异步事件如何稳定归并成可渲染的 session state
+3. 一个网页编辑型 agent demo，怎样以最小实现跑通 plan、action、interaction、file、preview 的闭环
+4. Web 工作台应该如何围绕这些状态来组织，而不是直接绑死到某个模型或某个运行时实现
 
-但这个 repo 要往前走一步：
-- 不只是生成代码
-- 还要真正把代码写进项目
-- 还要运行命令
-- 还要启动服务
-- 还要把运行结果展示给用户
+所以这个 repo 的价值，不在于“功能已经很多”，而在于它先把结构钉住了。
 
-所以它本质上不是一个普通 AI Chat App，而是一个：
+====================
+二、当前产品形态
+====================
 
-“以聊天为入口、以浏览器内执行环境为核心、以结构化动作协议驱动的 AI 编程工作台”
+从 README 和代码来看，当前产品形态更接近下面这句话：
 
-二、整个产品的大体思路
+“一个面向 AI 辅助网页编辑工作流的 IDE 风格 demo 工作台”
 
-这个产品的核心思路可以拆成四层：
+它现在已经覆盖的链路是：
 
-1. 用户层
-用户通过聊天描述需求，比如：
-- 帮我创建一个 React todo app
-- 给当前页面加深色模式
-- 修复这个构建报错
+用户意图
+-> demo agent 生成 message / plan / action / interaction 事件
+-> core reducer 归并成 session state
+-> web 端渲染 chat / plan / timeline / files / preview
+-> browser runtime stub 回放文件与预览结果
 
-2. 模型层
-模型不只是回答文字，而是被要求输出一套结构化动作，告诉系统：
-- 该创建哪些文件
-- 该修改哪些文件
-- 该执行哪些命令
+它还没有覆盖这些能力：
 
-3. 执行层
-前端把这些动作解析出来，在浏览器内的 WebContainer 中真正执行：
-- 写文件
-- 跑命令
-- 启动 dev server
+- 真实多用户后端
+- 真实数据库持久化
+- 真实远程运行时
+- 真实模型调用链
+- 完整工具生态和权限系统
 
-4. 展示层
-执行结果自动映射到 UI：
-- 聊天区显示执行计划和状态
-- 文件树显示新文件
-- 编辑器显示代码
-- 终端显示命令输出
-- 预览面板显示运行结果
+====================
+三、为什么采用 monorepo
+====================
 
-所以它不是“聊天 + 代码块”，而是：
+当前仓库采用 monorepo，不是为了“拆很多包”，而是为了把未来最容易耦合的边界提前拆开。
 
-聊天输入
--> 模型生成结构化计划
--> 系统执行计划
--> IDE UI 展示执行后的真实项目状态
+这几个边界是当前代码里最重要的：
 
-三、这个 repo 的核心设计选择
+1. 协议边界
 
-这个 repo 最重要的几个设计决策是：
+`packages/protocol` 统一约束事件、动作、交互和 session 类型。
 
-1. 执行环境放在浏览器，不放在服务端
+2. 归并与执行边界
 
-它没有把每个用户项目放到远程 Linux 容器里跑，而是使用 WebContainer。
+`packages/core` 统一处理 session state、event reduction、executor 基础能力和 runtime adapter 接口。
 
-这带来几个结果：
-- 服务端压力更小，因为不负责真正跑项目
-- 前端可以直接感知文件系统、终端、端口变化
-- 用户体验更即时，状态同步链更短
-- 但也要接受 WebContainer 的限制，比如不能跑原生二进制，不能像完整 Linux 一样什么都能装
+3. 模型边界
 
-这是整个项目最底层的架构选择。很多后面的实现方式，都是由这个选择决定的。
+`packages/model-gateway` 把“任务类型 -> 模型 profile”这层独立出来。
 
-2. 让模型输出“协议”，而不是自由文本
+4. 运行时边界
 
-这个 repo 没把模型当成单纯文本生成器，而是让模型按固定协议输出：
-- <boltArtifact>
-- <boltAction type="file">
-- <boltAction type="shell">
+`packages/runtime-browser` 和 `packages/runtime-remote` 表达了“同一套上层逻辑，底层 runtime 可以替换”的方向。
 
-这意味着模型的输出不只是“给人看”，还是“给系统执行”。
+5. UI 组织边界
 
-这样做的好处是：
-- 前端可以稳定解析
-- 可以把 AI 输出转成真实动作
-- 可以显示动作状态
-- 可以控制执行顺序
+`packages/ui` 和 `apps/web` 负责 workbench 面板组织及其 view model，不直接承载协议定义。
 
-可以说，这个 repo 的 AI 能力能落地，主要靠这层协议设计。
+这种拆法的重点不是包多，而是让后续替换模型、替换 runtime、替换 UI 时，不需要把整套逻辑推翻。
 
-3. 用状态系统把“运行时”映射到“界面”
+====================
+四、当前实现的核心层次
+====================
 
-repo 并不是让组件自己管理一堆局部状态，而是围绕运行时建立统一状态层：
-- FilesStore 同步文件系统
-- PreviewsStore 同步端口
-- TerminalStore 同步 shell
-- ActionRunner 维护执行状态
-- WorkbenchStore 做统一编排
+可以把当前 repo 理解成五层。
 
-这让 UI 只是这些状态的投影，而不是业务真相源。
+1. 协议层
 
-4. 把“持续迭代项目”作为第一优先级
+对应 `packages/protocol`。
 
-这不是一次性代码生成器。
-它重点支持：
-- 用户先让 AI 生成一个项目
-- 然后用户自己改一点
-- 再让 AI 基于当前最新状态继续改
+这一层定义了系统最底层的共享语言：
 
-所以它专门设计了“把本地文件 diff 再发回模型”的链路。这个设计非常关键，因为没有这一步，模型就不知道项目后来发生了什么变化。
+- `PlanStep`
+- `AgentAction`
+- `ActionState`
+- `PendingInteraction`
+- `RuntimeSnapshot`
+- `SessionState`
+- `AgentEvent`
 
-四、这个 repo 的实现路线
+这是整个 repo 最关键的基础，因为没有统一协议，agent、runtime、web 三层就无法解耦。
 
-如果从“产品是怎么被实现出来的”来理解，大致是沿着下面这条路线搭建的。
+2. 状态归并层
 
-第一步：先搭一个标准 Web 应用壳
+对应 `packages/core`。
 
-基础框架是：
-- Remix 负责 SSR、路由、请求处理
-- React 负责页面组件
-- Vite 负责本地开发和构建
-- Cloudflare Pages 负责部署
+这一层解决的问题是：
 
-这一层解决的是：
-- 页面怎么渲染
-- API 怎么暴露
-- 项目怎么构建发布
+- session 初始状态怎么创建
+- event stream 如何变成稳定的 session state
+- message、plan、action、interaction、runtime 状态如何收口
+- runtime adapter 应该暴露什么接口
 
-这部分本身不神奇，但它给后面 AI 工作流提供了 Web 容器。
+当前 `applyAgentEvent()` 是这层的核心。它让 event-driven demo 真正成立，因为所有上层展示都依赖它归并出来的状态。
 
-第二步：接入模型流式输出
+3. 模型路由层
 
-接着实现聊天 API：
-- 前端发消息
-- 服务端调用模型
-- 把结果流式返回前端
+对应 `packages/model-gateway`。
 
-这一层先解决“能聊起来”，但此时仍然只是普通聊天系统。
+虽然当前实现还是 stub，但它已经先表达出正确方向：
 
-第三步：给模型加系统约束和输出协议
+- planning
+- coding
+- review
+- summary
+- title
 
-真正从“聊天”变成“AI 编程代理”的关键，在于那份 system prompt。
+也就是说，仓库并没有把“模型”当成一个全局单值，而是当成按任务分工的 profile。
 
-它做了三件核心事情：
-- 告诉模型当前运行环境是什么，有限制什么
-- 告诉模型回复必须按什么结构输出
-- 告诉模型动作应该怎么排序和组织
+这一点对后续接入真实模型很重要。
 
-从这一刻开始，模型输出不再只是答案，而是可执行方案。
+4. 运行时层
 
-第四步：做一个流式解析器
+对应 `packages/runtime-browser` 和 `packages/runtime-remote`。
 
-模型输出既然是协议化文本，就需要一个能在流式场景里增量解析的 parser。
+当前真正跑通的是 `runtime-browser` stub。它已经提供统一的 runtime 形状，例如：
 
-这个 parser 的职责是：
-- 一边接收 assistant token
-- 一边识别标签
-- 一边触发动作事件
+- `readFile`
+- `writeFile`
+- `patchFile`
+- `listFiles`
+- `runCommand`
+- `openPreview`
+- `watchFiles`
+- `watchPorts`
 
-它不能等整段消息结束后再处理，因为这个产品强调“边生成边执行”，体验上更像一个实时 agent。
+这让上层逻辑只依赖 `RuntimeAdapter`，而不必关心底下到底是浏览器 stub 还是真实远程容器。
 
-第五步：把解析结果接到执行器
+5. 应用层
 
-当 parser 识别出一个 file action 或 shell action 后，系统需要真的执行。
+对应 `apps/agent` 和 `apps/web`。
 
-所以引入 ActionRunner：
-- 串行排队执行动作
-- 写文件
-- 跑命令
-- 记录状态
+`apps/agent` 负责 demo agent 流程。
+`apps/web` 负责把事件归并成工作台状态，再组织成用户可见的界面。
 
-这一层是“AI 回复”变成“真实项目改动”的桥。
+====================
+五、当前 demo 的实现重心
+====================
 
-第六步：让 WebContainer 成为运行时核心
+如果只看“当前已经落地的演示”，核心重心其实是 block 级网页编辑。
 
-有了动作执行器之后，系统就需要一个实际运行环境。
+当前 flow 大致是：
 
-WebContainer 在这里承担：
-- 文件系统
-- Shell 进程
-- 端口暴露
-- Node 项目执行环境
+1. 用户在 Web 端选中一个 block，形成 block edit request
+2. Agent 生成说明性 planner message
+3. Agent 发出结构化 plan
+4. `model-gateway` 返回 demo coding 消息
+5. Agent 构造 `file.patch` 动作
+6. Agent 插入确认型 interaction
+7. Executor 执行动作
+8. Browser runtime stub 发出 `file.changed`
+9. Browser runtime stub 发出 `preview.ready`
+10. Web 端把 session state 映射成 workbench view model
 
-于是项目终于不再只是“理论上的代码生成”，而是“代码真的被写进去并跑起来”。
+当前设计上最值得注意的点有三个：
 
-第七步：围绕运行时搭状态同步层
+第一，核心是真正的事件闭环，而不是某个具体 UI。
 
-一旦 WebContainer 变成运行时核心，就必须把它的变化同步到前端 UI。
+第二，当前 patch 是 block-scoped demo patch，不是完整 AST 级代码变更系统。
 
-所以才有：
-- 文件监听 -> FilesStore
-- 端口监听 -> PreviewsStore
-- shell 管理 -> TerminalStore
+第三，preview 也是 runtime stub 的回放结果，不是远程真实应用部署。
 
-这一层的价值是让运行结果自然出现在 UI 中，而不是每次靠人工刷新。
+====================
+六、Web 端现在是怎么组织的
+====================
 
-第八步：把 UI 做成一个轻量 IDE
+`apps/web` 当前不是一个“直接连模型 API 的聊天应用”，而是一个消费 demo event stream 的工作台渲染层。
 
-当文件、终端、预览都已经有状态了，就需要一个 UI 容器把它们组合起来。
+它的关键职责包括：
 
-于是 Workbench 出现了：
-- 文件树
-- 编辑器
-- 终端
-- 预览
+1. 归并事件
 
-这使得整个产品从“聊天机器人页面”变成“带执行能力的开发工作台”。
+`reduceWorkbenchEvents()` 会把初始事件集约成 session 相关状态。
 
-第九步：支持会话历史和持续迭代
+2. 组织 view model
 
-最后再补上：
-- IndexedDB 保存消息历史
-- 会话标题和 URL
-- 侧边栏历史记录
+`createWorkbenchViewModel()` 负责把 session state 变成 UI 更容易消费的结构，例如：
 
-这让用户可以回到之前的项目上下文继续工作，而不是每次都从零开始。
+- chat messages
+- plan
+- actions
+- pending interaction
+- files
+- previews
+- patch actions
+- 当前 block 编辑状态
+- 当前 diff 选中项
 
-五、站在工程视角，整个 repo 的主干是什么
+3. 定义交互式网页编辑状态
 
-如果把 repo 当作一棵树，它的主干其实只有 5 根：
+Web 端维护了 block、selection、properties、intent、suggestedPrompt 这些状态，说明当前 demo 不是单纯展示事件，而是已经有“网页局部编辑”的交互模型。
 
-1. 页面与路由主干
+====================
+七、Agent 端现在是怎么组织的
+====================
 
-作用：
-- 提供页面框架
-- 提供聊天 API 入口
-- 连接 SSR 和客户端
+`apps/agent` 当前是一个 demo flow orchestrator。
 
-代表模块：
-- root
-- routes
-- entry.client
-- entry.server
+它的重点不是“复杂 agent 自主性”，而是把系统涉及的关键事件都串起来：
 
-2. LLM 主干
+- planner message
+- plan update
+- model output
+- approval interaction
+- action created / updated
+- file changed
+- preview ready
 
-作用：
-- 调模型
-- 注入系统提示
-- 规范模型输出
+这让整个 repo 可以在没有真实模型、没有真实远程 runtime 的情况下，先把 session 演化路径和 workbench 展示路径跑通。
 
-代表模块：
-- app/lib/.server/llm/*
+换句话说，当前 `apps/agent` 的主要价值是“验证协议和状态机”，不是“完成真正智能体能力”。
 
-3. 协议解析与动作执行主干
+====================
+八、当前实现最重要的工程判断
+====================
 
-作用：
-- 解析模型输出
-- 生成动作事件
-- 串行执行文件和命令
+从工程角度看，这个 repo 当前最正确的几个判断是：
 
-代表模块：
-- message-parser
-- action-runner
+1. 先把协议做出来
 
-4. WebContainer 运行时主干
+很多 AI 产品一开始把所有状态塞进页面组件和接口返回里，后面越做越乱。这个 repo 先抽出 `@ezu/protocol`，方向是对的。
 
-作用：
-- 提供浏览器内项目运行环境
-- 挂接文件系统、终端和端口
+2. 先把 reducer 做出来
 
-代表模块：
-- webcontainer
-- files store
-- terminal store
-- previews store
+事件驱动系统如果没有明确的 state reduction 层，很快就会出现 UI、agent、runtime 三边各自维护状态的问题。现在 `@ezu/core` 先承担这层职责，是合理的。
 
-5. Workbench UI 主干
+3. 先把 runtime 抽象做出来
 
-作用：
-- 把聊天、执行状态、文件系统和预览连接成一个产品界面
+即使当前 `runtime-remote` 还没实现，`RuntimeAdapter` 已经把未来扩展位留好了。这能显著降低后续替换执行层的成本。
 
-代表模块：
-- Chat
-- Markdown
-- Artifact
-- Workbench
-- EditorPanel
-- Preview
+4. 先用 stub 验证闭环
 
-六、这个 repo 最关键的闭环是什么
+在真实模型、真实沙箱、真实存储都还没接入前，先用 stub 跑通 message -> plan -> action -> preview 的闭环，是更稳的实现顺序。
 
-整个 repo 最关键的不是任何单个文件，而是下面这个闭环：
+====================
+九、当前局限也需要明确
+====================
 
-用户提出需求
--> 模型按协议输出动作
--> parser 识别动作
--> 执行器在 WebContainer 里执行
--> 文件/端口/终端状态变化
--> store 接收变化
--> UI 自动更新
--> 用户看到结果并继续下一轮指令
+如果按“当前仓库已经实现了什么”来判断，以下限制必须明确：
 
-这个闭环一旦成立，产品就从“AI 回答器”变成“AI 工作流系统”。
+1. `model-gateway` 目前只是 stub，不是真实供应商接入层。
 
-七、这个 repo 的难点主要在哪里
+2. `runtime-browser` 目前是浏览器侧演示 runtime，不是完整沙箱。
 
-这个 repo 真正难的地方，不是普通 React 组件，而在下面几个点：
+3. `runtime-remote` 目前还是结构占位，没有真实执行能力。
 
-1. 让模型稳定输出可执行结构
+4. session 目前是内存态 / demo 态，不是持久化产品状态。
 
-如果协议设计不稳，或者 prompt 约束不够，整个系统就会失控，因为后面所有执行都依赖这个结构化输出。
+5. 当前测试覆盖仍然偏窄，README 也明确说明主要覆盖 replacement prompt / structure 相关 helper。
 
-2. 流式解析要稳
+====================
+十、应该怎样理解这个 repo 的阶段
+====================
 
-assistant 输出是流式的，不是完整字符串一次性到达。解析器必须能处理中间态、半个标签、跨 chunk 内容。
+最准确的理解方式是：
 
-3. 执行动作要有顺序
+这个 repo 现在处于“架构原型已经成形、产品能力仍然很早期”的阶段。
 
-先装依赖再写文件，还是先写 package.json 再 npm install，这些都不能乱，否则项目状态会坏。
+它已经证明：
 
-4. 运行时状态要和 UI 同步
+- monorepo 分层基本成立
+- 协议设计可以支撑 demo agent workflow
+- reducer 可以把事件流稳定压成 session state
+- Web workbench 可以消费这些状态并形成 IDE 风格界面
 
-文件更新、端口出现、终端输出都必须尽量实时反映，不然用户会觉得 AI 说做了，但页面没变化。
+但它还没有证明：
 
-5. 要允许“人和 AI 共同编辑”
+- 真实模型接入后的行为稳定性
+- 真实 runtime 执行的可靠性
+- 多会话、多项目、持久化和权限控制
+- 生产环境下的性能和安全性
 
-用户自己修改文件后，AI 下一轮必须知道这些变更，否则很容易覆盖用户工作或基于旧状态继续改错。
+====================
+十一、当前一句话总结
+====================
 
-八、如果把这个 repo 当作产品路线图，可以怎么理解
+当前这个 repo 最适合被理解成：
 
-它的产品路线很像这样：
+“一个围绕协议、事件归并、block 级编辑 demo、浏览器 runtime stub 和 IDE 风格工作台构建的 AI workspace monorepo 原型”
 
-阶段 1：
-做一个 AI 聊天入口
+如果后续继续推进，实现顺序也很自然：
 
-阶段 2：
-让 AI 不只是说，还能产出结构化动作
-
-阶段 3：
-把动作接到浏览器内执行环境
-
-阶段 4：
-把执行结果做成可视化 IDE
-
-阶段 5：
-支持会话持续化和多轮项目迭代
-
-所以这是一个“从 Chat 升级为 Agent IDE”的实现过程。
-
-九、用一句话总结整个 repo 的大体思路
-
-这个 repo 的整体思路可以概括为：
-
-“用 Remix 搭页面和 API，用大模型生成结构化开发动作，用 WebContainer 在浏览器里执行这些动作，再用 Workbench 把文件、终端和预览实时展示出来，从而把聊天式 AI 变成一个真正可操作的浏览器内开发环境。”
-
-十、用一句话总结实现路线
-
-实现路线可以概括为：
-
-“先搭 Web 应用壳，再接模型流式输出，再通过 prompt 把输出协议化，再写流式 parser 和动作执行器，再把执行器接到 WebContainer，最后围绕运行时状态搭建文件树、编辑器、终端、预览和历史会话，形成完整闭环。”
+- 先把 stubbed model gateway 替换成真实模型调用
+- 再把 remote runtime 补齐
+- 再加持久化和真实会话管理
+- 最后再补更复杂的 agent orchestration 与权限控制
