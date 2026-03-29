@@ -3,6 +3,8 @@
 1. 数据库表结构设计
 2. 事件流协议设计
 
+这是一份面向下一版架构的数据与协议设计参考，不是当前仓库的数据实现说明。当前 repo 重点仍然是事件协议、session reduction 和 demo runtime/UI 闭环；这里讨论的是在引入真实后端、持久化和远程 runtime 后更完整的数据模型应该怎样设计。
+
 目标是服务一个“多模型 + 交互式 AI 编程工作台”的重构版本。重点不是和当前 repo 完全一致，而是给下一版架构一个可落地的数据和协议基础。
 
 ====================
@@ -107,7 +109,7 @@
 - updated_at
 
 说明：
-- `runtime_type` 决定这个项目默认跑在 WebContainer 还是远程 runtime。
+- `runtime_type` 决定这个项目默认跑在 browser runtime 还是远程 runtime。
 - `default_model_profile` 对应一套模型路由策略。
 
 --------------------------------
@@ -769,4 +771,3 @@ type SessionSnapshotEvent = BaseEvent & {
 一句话总结：
 
 数据库负责“可恢复、可审计、可追踪”，事件协议负责“可实时驱动 UI、可重放、可解耦模型输出”。两者不要混在一起设计。
-

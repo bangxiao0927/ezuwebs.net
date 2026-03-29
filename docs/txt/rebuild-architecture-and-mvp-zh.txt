@@ -3,6 +3,8 @@
 1. 目录结构 + 核心类型定义
 2. 第一版重构 MVP 的开发顺序
 
+这是一份重构方案草图，不是当前仓库实现说明。当前 repo 已经是 TypeScript monorepo，并且已经落地了 `apps/web`、`apps/agent`、`packages/protocol`、`packages/core`、`packages/model-gateway`、`packages/runtime-browser`、`packages/runtime-remote`、`packages/ui` 这些基础结构；本文更侧重下一版如何继续扩展和重构。
+
 目标不是解释当前 repo，而是给“重新实现这个网站核心功能并重构”的方案草图。重点是支持：
 - 多模型接入，比如 GPT、Codex
 - 更强的交互式设计
@@ -12,9 +14,9 @@
 一、推荐目录结构
 ====================
 
-推荐采用 TypeScript monorepo，结构尽量克制，不要一开始拆太碎。
+如果继续往下一版演进，建议保持 TypeScript monorepo 方向，结构尽量克制，不要继续过早拆得过碎。
 
-建议目录：
+建议在现有 monorepo 基础上按下面方向继续整理：
 
 /apps
   /web
@@ -31,7 +33,7 @@
     核心业务层。定义 planner、executor、session state、action queue、diff merge。
 
   /runtime-browser
-    浏览器运行时适配层。封装 WebContainer 的文件、命令、端口、watch 能力。
+    浏览器运行时适配层。封装当前 browser runtime stub 的文件、命令、端口、watch 能力，后续也可以替换成更完整的浏览器执行层。
 
   /runtime-remote
     远程运行时适配层。后续如需切到远程 sandbox，可以复用相同接口。
@@ -84,7 +86,7 @@
 - 定义 action、event、tool、plan、session 的 schema
 - 用 zod 做运行时校验
 
-这是整个重构最该优先抽出来的包，因为它决定后续扩展成本。
+这类共享协议包应该继续保持为优先边界，因为它决定后续扩展成本。
 
 4. packages/core
 
@@ -95,16 +97,16 @@
 - 用户确认点插入
 - 错误恢复和重试策略
 
-这里是产品逻辑层，不应该依赖 React，也不应该直接依赖 WebContainer。
+这里是产品逻辑层，不应该依赖 React，也不应该直接依赖具体浏览器运行时实现。
 
 5. packages/runtime-browser
 
 职责：
-- 把 WebContainer 包装成统一 Runtime 接口
+- 把浏览器 runtime stub 或未来远程 runtime 都包装成统一 Runtime 接口
 - 提供 readFile、writeFile、runCommand、watchFiles、watchPorts 等能力
 
 这一层的目标是：
-“让上层不关心下面是不是 WebContainer”
+“让上层不关心下面到底是 browser runtime stub 还是真实 remote runtime”
 
 6. packages/model-gateway
 
@@ -337,7 +339,7 @@ export type PendingInteraction =
 
 8. 运行时接口
 
-一定要定义统一 Runtime 接口，避免上层代码绑定 WebContainer。
+一定要定义统一 Runtime 接口，避免上层代码绑定某一种具体 runtime 实现。
 
 ```ts
 export interface RuntimeAdapter {
@@ -455,11 +457,11 @@ export interface ModelGateway {
 - 前后端能基于同一套 schema 通信
 - 能手工发送一条 action.created 事件给前端并渲染出来
 
-第二阶段：做最小可用 runtime
+第二阶段：扩展最小可用 runtime
 
 目标：
-- 接上 WebContainer
-- 实现 RuntimeAdapter
+- 先把现有 browser runtime stub 补到够用
+- 明确 RuntimeAdapter 的稳定边界
 
 要做的事：
 - 实现 readFile / writeFile / listFiles
@@ -468,15 +470,15 @@ export interface ModelGateway {
 
 交付标准：
 - 前端能看到文件树
-- 能在浏览器里运行简单命令
+- runtime 层能稳定回放简单命令或命令输出
 - 能在有端口时显示 preview
 
-第三阶段：做最小会话和事件流
+第三阶段：把最小会话和事件流从 demo 继续推进
 
 目标：
-- 做 apps/agent 的最小服务
-- 前端能建立一个 session
-- 后端能持续向前端推送事件
+- 在现有 demo agent 流程上继续扩展
+- 让前端能建立更真实的 session
+- 让事件流从本地 demo 进一步走向真实请求驱动
 
 要做的事：
 - 创建 session state
@@ -487,7 +489,7 @@ export interface ModelGateway {
 - 后端能持续发 message.delta
 - 前端能实时显示增量消息
 
-第四阶段：先只接一个主模型
+第四阶段：先把 stub 模型网关替换成一个真实主模型
 
 目标：
 - 不要一开始就多模型
@@ -538,7 +540,7 @@ export interface ModelGateway {
 - 模型遇到歧义时能请求用户选择
 - 用户选择后系统继续执行
 
-第七阶段：把 planner 和 coder 拆成双模型
+第七阶段：把 planner 和 coder 从单模型流程拆成双模型
 
 目标：
 - 提高可控性和性能
