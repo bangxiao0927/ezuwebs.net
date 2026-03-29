@@ -481,7 +481,7 @@ export class BrowserRuntimeStub implements RuntimeAdapter {
       }
 
       if (/(dev|serve|preview|start)/i.test(command)) {
-        void this.openPreview(4173).then((port) => {
+        void this.openPreview(4174).then((port) => {
           process.emitOutput(`preview ready: ${port.url}\n`);
           process.emitExit(0);
         });
@@ -495,7 +495,7 @@ export class BrowserRuntimeStub implements RuntimeAdapter {
     return process;
   }
 
-  async openPreview(port = 4173): Promise<RuntimePort> {
+  async openPreview(port = 4174): Promise<RuntimePort> {
     const currentUrl = this.openPorts.get(port);
 
     if (currentUrl && currentUrl.startsWith("blob:")) {

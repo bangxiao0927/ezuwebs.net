@@ -179,7 +179,7 @@ export async function bootstrapBlockEditDemo(
     source: "system",
     action: {
       type: "preview.open",
-      port: 4173,
+      port: 4174,
     },
   });
 
@@ -298,7 +298,7 @@ export async function bootstrapReplacementBlockEditDemo(
     source: "system",
     action: {
       type: "preview.open",
-      port: 4173,
+      port: 4174,
     },
   });
 
@@ -373,7 +373,7 @@ export async function bootstrapAgentApp(options: AgentAppOptions): Promise<Agent
     source: "system",
     action: {
       type: "preview.open",
-      port: 4173,
+      port: 4174,
     },
   });
 
