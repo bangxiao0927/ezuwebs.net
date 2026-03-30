@@ -10,7 +10,7 @@ export interface WorkspaceSnapshot {
   files: WorkspaceFileEntry[];
 }
 
-const workspaceRoot = "/Users/bangxiao/Documents/ezuwebs.net";
+const workspaceRoot = ".";
 
 const workspaceModules = import.meta.glob(
   [
