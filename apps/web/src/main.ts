@@ -829,7 +829,7 @@ function renderSessionLauncher(): string {
         <div class="launcher-threads" data-launcher-threads></div>
         <div class="launcher-hero-copy">
           <p class="eyebrow">Threads Homepage</p>
-          <h1>ezuwebs.net</h1>
+          <h1>ezuwebs.com</h1>
           <p class="launcher-copy">
             Session-first workspace for shipping interfaces, previews, and patch reviews.
           </p>
@@ -1929,7 +1929,7 @@ async function mount(): Promise<void> {
   const sessionId = getSessionIdFromLocation(window.location);
 
   if (!sessionId) {
-    document.title = "ezuwebs.net | Session Launcher";
+    document.title = "ezuwebs.com | Session Launcher";
     document.body.innerHTML = renderSessionLauncher();
     attachLauncherStyles();
     attachLauncherListeners(document.body);
