@@ -21,11 +21,13 @@ export default defineConfig({
     },
   },
   server: {
+    allowedHosts: ["ezuwebs.com", "www.ezuwebs.com"],
     host: "127.0.0.1",
     port: 4174,
     strictPort: true,
   },
   preview: {
+    allowedHosts: ["ezuwebs.com", "www.ezuwebs.com"],
     host: "127.0.0.1",
     port: 4174,
     strictPort: true,
