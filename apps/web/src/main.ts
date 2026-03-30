@@ -826,7 +826,10 @@ function renderSessionLauncher(): string {
           <p class="eyebrow">Threads Homepage</p>
           <h1>ezuwebs.com</h1>
           <p class="launcher-copy">
-            Session-first workspace for shipping interfaces, previews, and patch reviews.
+            AI based web IDE for building, previewing, and sharing web projects workspace. 
+          </p>
+          <p class="launcher-meta">
+            Make your own websites easier.
           </p>
           <div class="launcher-actions">
             <button class="launcher-button launcher-button-primary" data-open-session="club-promo" type="button">Open Demo Session</button>
@@ -846,6 +849,7 @@ function attachLauncherStyles(): void {
       color-scheme: dark;
       --launcher-text: #f5f7fb;
       --launcher-muted: #a8bad1;
+      --launcher-meta: #565fe7;
       --launcher-border: rgba(171, 212, 255, 0.2);
       --launcher-panel: rgba(31, 43, 64, 0.34);
       --launcher-surface: rgba(39, 54, 79, 0.72);
@@ -940,10 +944,15 @@ function attachLauncherStyles(): void {
     .launcher-card p,
     .launcher-meta {
       color: var(--launcher-muted);
-      line-height: 1.7;
+      line-height: 1;
       margin: 0;
     }
 
+  .launcher-meta {
+      color: var(--launcher-meta);
+      line-height: 0.5;
+      margin: 0;
+  }
     .launcher-actions,
     .launcher-card-meta,
     .launcher-card-head {
