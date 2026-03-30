@@ -1,6 +1,6 @@
-# ezuwebs.net
+# ezuwebs.com
 
-`ezuwebs.net` is a TypeScript monorepo for an AI-assisted web building workspace demo.
+`ezuwebs.com` is a TypeScript monorepo for an AI-assisted web building workspace demo.
 
 The current codebase is not a full production product yet. What exists today is a working repository skeleton that demonstrates:
 
@@ -161,7 +161,7 @@ Design and architecture notes are kept under `docs/txt/`. They are useful for un
 
 ## 中文说明
 
-`ezuwebs.net` 是一个 TypeScript monorepo，用来承载一个 AI 辅助网页构建工作台的演示原型。
+`ezuwebs.com` 是一个 TypeScript monorepo，用来承载一个 AI 辅助网页构建工作台的演示原型。
 
 当前仓库还不是完整的生产级产品。现在已经落地的部分，主要是一个可以运行的基础骨架，覆盖了这些能力：
 

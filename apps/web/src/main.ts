@@ -56,9 +56,9 @@ uniform vec2 uMouse;
 
 #define PI 3.1415926538
 
-const int u_line_count = 28;
-const float u_line_width = 4.0;
-const float u_line_blur = 6.0;
+const int u_line_count = 18;
+const float u_line_width = 3.0;
+const float u_line_blur = 4.0;
 
 float Perlin2D(vec2 P) {
     vec2 Pi = floor(P);
@@ -202,7 +202,9 @@ function mountLauncherThreads(target: HTMLElement): () => void {
   const gl = canvas.getContext("webgl", {
     alpha: true,
     antialias: false,
+    desynchronized: true,
     premultipliedAlpha: true,
+    powerPreference: "high-performance",
   });
 
   if (!gl) {
@@ -253,7 +255,7 @@ function mountLauncherThreads(target: HTMLElement): () => void {
   const resize = () => {
     const width = Math.max(1, Math.floor(target.clientWidth));
     const height = Math.max(1, Math.floor(target.clientHeight));
-    const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
+    const ratio = Math.min(window.devicePixelRatio || 1, 1.25);
 
     canvas.width = Math.floor(width * ratio);
     canvas.height = Math.floor(height * ratio);
@@ -264,14 +266,18 @@ function mountLauncherThreads(target: HTMLElement): () => void {
   };
 
   resize();
-  window.addEventListener("resize", resize);
+  const resizeObserver = new ResizeObserver(() => {
+    resize();
+  });
+  resizeObserver.observe(target);
+  window.addEventListener("resize", resize, { passive: true });
 
   let currentMouseX = 0.5;
   let currentMouseY = 0.5;
   let targetMouseX = 0.5;
   let targetMouseY = 0.5;
 
-  const handleMouseMove = (event: MouseEvent) => {
+  const handleMouseMove = (event: PointerEvent) => {
     const rect = target.getBoundingClientRect();
     targetMouseX = (event.clientX - rect.left) / rect.width;
     targetMouseY = 1 - (event.clientY - rect.top) / rect.height;
@@ -282,21 +288,24 @@ function mountLauncherThreads(target: HTMLElement): () => void {
     targetMouseY = 0.5;
   };
 
-  target.addEventListener("mousemove", handleMouseMove);
-  target.addEventListener("mouseleave", handleMouseLeave);
+  target.addEventListener("pointermove", handleMouseMove, { passive: true });
+  target.addEventListener("pointerleave", handleMouseLeave, { passive: true });
 
   let frameId = 0;
-  let lastRenderTime = 0;
+  let isVisible = true;
+  const visibilityObserver = new IntersectionObserver((entries) => {
+    isVisible = entries.some((entry) => entry.isIntersecting);
+  });
+  visibilityObserver.observe(target);
 
   const renderFrame = (now: number) => {
     frameId = requestAnimationFrame(renderFrame);
-    if (document.hidden || now - lastRenderTime < 33) {
+    if (document.hidden || !isVisible) {
       return;
     }
-    lastRenderTime = now;
     gl.useProgram(program);
-    currentMouseX += 0.05 * (targetMouseX - currentMouseX);
-    currentMouseY += 0.05 * (targetMouseY - currentMouseY);
+    currentMouseX += 0.1 * (targetMouseX - currentMouseX);
+    currentMouseY += 0.1 * (targetMouseY - currentMouseY);
     gl.uniform2f(mouseLocation, currentMouseX, currentMouseY);
     gl.uniform1f(timeLocation, now * 0.001);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -307,9 +316,11 @@ function mountLauncherThreads(target: HTMLElement): () => void {
 
   return () => {
     cancelAnimationFrame(frameId);
+    visibilityObserver.disconnect();
+    resizeObserver.disconnect();
     window.removeEventListener("resize", resize);
-    target.removeEventListener("mousemove", handleMouseMove);
-    target.removeEventListener("mouseleave", handleMouseLeave);
+    target.removeEventListener("pointermove", handleMouseMove);
+    target.removeEventListener("pointerleave", handleMouseLeave);
     gl.deleteBuffer(geometryBuffer);
     gl.deleteProgram(program);
     gl.getExtension("WEBGL_lose_context")?.loseContext();
@@ -804,41 +815,25 @@ function createWorkspacePreviewUrl(filePath: string, content: string): string {
 }
 
 function renderSessionLauncher(): string {
-  const sessionCards = listDemoSessions()
-    .map(
-      (session, index) => `
-        <button class="launcher-card" data-open-session="${session.id}" type="button">
-          <div class="launcher-card-head">
-            <p class="eyebrow">Session 0${index + 1}</p>
-            <span class="launcher-chip">Open</span>
-          </div>
-          <h2>${session.title}</h2>
-          <p>${session.description}</p>
-          <div class="launcher-card-meta">
-            <span class="launcher-meta">${session.taskTitle}</span>
-            <span class="launcher-meta">${session.taskTimestamp}</span>
-          </div>
-        </button>
-      `,
-    )
-    .join("");
-
   return `
     <main class="launcher-shell">
       <section class="launcher-hero">
         <div class="launcher-threads" data-launcher-threads></div>
+        <button class="launcher-user-placeholder" type="button" aria-label="User Center">
+          User Center
+        </button>
         <div class="launcher-hero-copy">
           <p class="eyebrow">Threads Homepage</p>
-          <h1>ezuwebs.net</h1>
+          <h1>ezuwebs.com</h1>
           <p class="launcher-copy">
-            Session-first workspace for shipping interfaces, previews, and patch reviews.
+            AI based web IDE for building, previewing, and sharing web projects workspace. 
+          </p>
+          <p class="launcher-meta">
+            Make your own websites easier.
           </p>
           <div class="launcher-actions">
             <button class="launcher-button launcher-button-primary" data-open-session="club-promo" type="button">Open Demo Session</button>
             <button class="launcher-button" data-open-session="agency-redesign" type="button">Open Agency Session</button>
-          </div>
-          <div class="launcher-grid">
-            ${sessionCards}
           </div>
         </div>
       </section>
@@ -853,11 +848,12 @@ function attachLauncherStyles(): void {
     :root {
       color-scheme: dark;
       --launcher-text: #f5f7fb;
-      --launcher-muted: #94a7c2;
-      --launcher-border: rgba(171, 212, 255, 0.14);
-      --launcher-panel: rgba(13, 20, 34, 0.34);
-      --launcher-surface: rgba(19, 29, 45, 0.72);
-      --launcher-accent: #7cc4ff;
+      --launcher-muted: #a8bad1;
+      --launcher-meta: #565fe7;
+      --launcher-border: rgba(171, 212, 255, 0.2);
+      --launcher-panel: rgba(31, 43, 64, 0.34);
+      --launcher-surface: rgba(39, 54, 79, 0.72);
+      --launcher-accent: #8fd0ff;
       --launcher-shadow: 0 24px 90px rgba(0, 0, 0, 0.42);
     }
 
@@ -865,8 +861,8 @@ function attachLauncherStyles(): void {
       margin: 0;
       font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
       background:
-        radial-gradient(circle at top left, rgba(124, 196, 255, 0.14), transparent 24%),
-        linear-gradient(180deg, #060816 0%, #09111d 100%);
+        radial-gradient(circle at top left, rgba(143, 208, 255, 0.2), transparent 28%),
+        linear-gradient(180deg, #10192a 0%, #162235 100%);
       color: var(--launcher-text);
     }
 
@@ -878,25 +874,37 @@ function attachLauncherStyles(): void {
     .launcher-card,
     .launcher-hero {
       position: relative;
-      border: 1px solid var(--launcher-border);
-      border-radius: 24px;
       background: var(--launcher-panel);
-      box-shadow: var(--launcher-shadow);
-      backdrop-filter: blur(14px);
     }
 
     .launcher-hero {
       display: grid;
       place-items: center;
       min-height: 100vh;
-      padding: 32px;
+      padding: 0;
       overflow: hidden;
-      background: radial-gradient(circle at center, rgba(18, 30, 50, 0.42), rgba(6, 8, 22, 0.94));
+      background: radial-gradient(circle at center, rgba(58, 83, 118, 0.28), rgba(17, 27, 42, 0.88));
     }
 
     .launcher-threads {
       position: absolute;
       inset: 0;
+    }
+
+    .launcher-user-placeholder {
+      position: absolute;
+      top: 24px;
+      right: 24px;
+      z-index: 2;
+      border: 1px solid rgba(171, 212, 255, 0.22);
+      border-radius: 999px;
+      background: rgba(29, 42, 63, 0.72);
+      color: var(--launcher-text);
+      padding: 10px 14px;
+      font: inherit;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      backdrop-filter: blur(12px);
     }
 
     .launcher-threads {
@@ -915,6 +923,7 @@ function attachLauncherStyles(): void {
       position: relative;
       z-index: 1;
       width: min(960px, 100%);
+      padding: 32px;
       text-align: center;
       justify-items: center;
     }
@@ -935,10 +944,15 @@ function attachLauncherStyles(): void {
     .launcher-card p,
     .launcher-meta {
       color: var(--launcher-muted);
-      line-height: 1.7;
+      line-height: 1;
       margin: 0;
     }
 
+  .launcher-meta {
+      color: var(--launcher-meta);
+      line-height: 0.5;
+      margin: 0;
+  }
     .launcher-actions,
     .launcher-card-meta,
     .launcher-card-head {
@@ -960,14 +974,11 @@ function attachLauncherStyles(): void {
       text-transform: uppercase;
     }
 
-    .launcher-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 18px;
-      width: min(960px, 100%);
-    }
-
     .launcher-card {
+      border: 1px solid var(--launcher-border);
+      border-radius: 18px;
+      box-shadow: var(--launcher-shadow);
+      backdrop-filter: blur(14px);
       padding: 22px;
       color: inherit;
       text-align: left;
@@ -1040,18 +1051,28 @@ function attachLauncherStyles(): void {
     }
 
     @media (max-width: 980px) {
-      .launcher-hero {
+      .launcher-user-placeholder {
+        top: 18px;
+        right: 18px;
+      }
+
+      .launcher-hero-copy {
         padding: 24px;
       }
     }
 
     @media (max-width: 640px) {
-      .launcher-hero,
+      .launcher-user-placeholder {
+        top: 14px;
+        right: 14px;
+        padding: 9px 12px;
+      }
+
       .launcher-card {
         border-radius: 20px;
       }
 
-      .launcher-hero {
+      .launcher-hero-copy {
         padding: 18px;
       }
 
@@ -1929,7 +1950,7 @@ async function mount(): Promise<void> {
   const sessionId = getSessionIdFromLocation(window.location);
 
   if (!sessionId) {
-    document.title = "ezuwebs.net | Session Launcher";
+    document.title = "ezuwebs.com | Session Launcher";
     document.body.innerHTML = renderSessionLauncher();
     attachLauncherStyles();
     attachLauncherListeners(document.body);

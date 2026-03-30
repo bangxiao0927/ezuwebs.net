@@ -2042,7 +2042,7 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
     `// ${activeFile}\n\nNo file content is available for this workspace path yet.`;
   const viewMode: ViewMode = input.viewMode ?? "preview";
   const previewMode: PreviewMode = input.previewMode ?? "runtime";
-  const workspaceRoot = input.workspaceRoot ?? "/Users/bangxiao/Documents/ezuwebs.net";
+  const workspaceRoot = input.workspaceRoot ?? ".";
 
   return `
     <main class="app-shell">
