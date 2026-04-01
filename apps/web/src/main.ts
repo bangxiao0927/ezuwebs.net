@@ -30,6 +30,7 @@ type UiState = {
   previewAddress?: string;
   previewLoading?: boolean;
   toast?: string;
+  selectedModel?: string;
 };
 
 type PreviewHistoryState = {
@@ -364,6 +365,34 @@ function goHome(): void {
     history.pushState("", document.title, `${location.pathname}${location.search}`);
   }
   void mount();
+}
+
+function readStoredModel(): string {
+  try {
+    const value = sessionStorage.getItem("ezuwebs.selectedModel");
+    if (value) {
+      return value;
+    }
+  } catch {
+    // Ignore storage access errors (private mode, blocked storage, etc.).
+  }
+
+  return "gpt-4.1";
+}
+
+const DEMO_AUTH_STORAGE_KEY = "ezuwebs.auth.demo";
+
+function readDemoAuthSnapshot(): { provider?: string; email?: string } | null {
+  try {
+    const raw = localStorage.getItem(DEMO_AUTH_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    return JSON.parse(raw) as { provider?: string; email?: string };
+  } catch {
+    return null;
+  }
 }
 
 function normalizePreviewUrl(value: string): string {
@@ -819,7 +848,7 @@ function renderSessionLauncher(): string {
     <main class="launcher-shell">
       <section class="launcher-hero">
         <div class="launcher-threads" data-launcher-threads></div>
-        <button class="launcher-user-placeholder" type="button" aria-label="User Center">
+        <button class="launcher-user-placeholder" type="button" data-go-user-dashboard aria-label="User Center">
           User Center
         </button>
         <div class="launcher-hero-copy">
@@ -839,6 +868,85 @@ function renderSessionLauncher(): string {
       </section>
     </main>
   `;
+}
+
+function renderUserDashboard(): string {
+  const auth = readDemoAuthSnapshot();
+  const sessions = listDemoSessions();
+
+  return `
+    <main class="launcher-shell user-dashboard">
+      <section class="launcher-hero">
+        <button class="launcher-user-placeholder" type="button" data-go-home aria-label="Back to threads">
+          ← Threads
+        </button>
+        <div class="launcher-hero-copy">
+          <p class="eyebrow">Account</p>
+          <h1>User Center</h1>
+          <p class="launcher-copy">
+            ${
+              auth?.email
+                ? `Demo session: ${escapePreviewHtml(auth.email)} · provider ${escapePreviewHtml(auth.provider ?? "unknown")}`
+                : "Sign in to sync sessions across devices (server-backed auth is tracked in issues #9 and #10)."
+            }
+          </p>
+          <div class="launcher-actions">
+            <button class="launcher-button launcher-button-primary" type="button" data-demo-oauth-google>
+              Google OAuth (demo)
+            </button>
+            <button class="launcher-button" type="button" data-demo-oauth-gmail>
+              Gmail + SQL (demo)
+            </button>
+          </div>
+          <p class="launcher-meta">These buttons only persist a local placeholder until the API is wired to @ezu/db.</p>
+          <p class="eyebrow" style="margin-top:28px">Sessions</p>
+          <div class="launcher-actions">
+            ${sessions
+              .map(
+                (session) => `
+              <button class="launcher-button" type="button" data-open-session="${escapePreviewHtml(session.id)}">
+                ${escapePreviewHtml(session.title)}
+              </button>
+            `,
+              )
+              .join("")}
+          </div>
+        </div>
+      </section>
+    </main>
+  `;
+}
+
+function attachUserDashboardListeners(target: HTMLElement): void {
+  target.querySelector<HTMLButtonElement>("[data-go-home]")?.addEventListener("click", () => {
+    goHome();
+  });
+
+  for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-open-session]"))) {
+    button.addEventListener("click", () => {
+      const nextId = button.dataset.openSession;
+
+      if (nextId) {
+        setSessionHash(nextId);
+      }
+    });
+  }
+
+  target.querySelector<HTMLButtonElement>("[data-demo-oauth-google]")?.addEventListener("click", () => {
+    localStorage.setItem(
+      DEMO_AUTH_STORAGE_KEY,
+      JSON.stringify({ provider: "google-oauth", email: "demo@example.com", at: Date.now() }),
+    );
+    void mount();
+  });
+
+  target.querySelector<HTMLButtonElement>("[data-demo-oauth-gmail]")?.addEventListener("click", () => {
+    localStorage.setItem(
+      DEMO_AUTH_STORAGE_KEY,
+      JSON.stringify({ provider: "gmail-sql", email: "demo@example.com", at: Date.now() }),
+    );
+    void mount();
+  });
 }
 
 function attachLauncherStyles(): void {
@@ -1314,6 +1422,14 @@ function attachLauncherListeners(target: HTMLElement): void {
     });
   }
 
+  for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-go-user-dashboard]"))) {
+    button.addEventListener("click", () => {
+      if (location.hash !== "#/user") {
+        location.hash = "#/user";
+      }
+    });
+  }
+
   const threadsTarget = target.querySelector<HTMLElement>("[data-launcher-threads]");
 
   cleanupLauncherEffects?.();
@@ -1329,6 +1445,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
     workspaceRoot: state.workspaceRoot ?? defaultWorkspace.rootPath,
     viewMode: "preview",
     previewMode: state.previewMode ?? "runtime",
+    selectedModel: readStoredModel(),
   };
   let previewHistory: PreviewHistoryState = {
     entries: [],
@@ -1447,6 +1564,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
         : {}),
       previewCanGoBack: previewHistory.index > 0,
       previewCanGoForward: previewHistory.index >= 0 && previewHistory.index < previewHistory.entries.length - 1,
+      selectedModel: uiState.selectedModel ?? "gpt-4.1",
     };
     target.innerHTML = `${renderWebAppBody(renderState)}${renderDialog(state, uiState)}`;
 
@@ -1602,7 +1720,8 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
     const workspacePathInput = target.querySelector<HTMLInputElement>("[data-workspace-path-input]");
 
     previewFrame?.addEventListener("load", () => {
-      let nextUrl = previewFrame.src;
+      const srcUrl = previewFrame.src;
+      let nextUrl = srcUrl;
 
       try {
         previewFrame.contentWindow?.scrollTo(0, 0);
@@ -1611,17 +1730,16 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
       }
 
       try {
-        nextUrl = previewFrame.contentWindow?.location.href ?? nextUrl;
+        const href = previewFrame.contentWindow?.location.href;
+        if (href && href !== "about:blank") {
+          nextUrl = href;
+        }
       } catch {
-        nextUrl = previewFrame.src;
+        nextUrl = srcUrl;
       }
 
       const normalized = normalizePreviewUrl(nextUrl);
       if (!isUsablePreviewUrl(normalized)) {
-        uiState = {
-          ...uiState,
-          previewLoading: false,
-        };
         return;
       }
 
@@ -1737,11 +1855,31 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
           }
 
           const currentUrl = previewHistory.entries[previewHistory.index] ?? uiState.previewUrl;
+          if (!currentUrl) {
+            return;
+          }
+
           uiState = {
             ...uiState,
             previewLoading: true,
           };
-          previewFrame.src = currentUrl ?? previewFrame.src;
+          render();
+          requestAnimationFrame(() => {
+            const frame = target.querySelector<HTMLIFrameElement>("[data-preview-frame]");
+            if (!frame) {
+              return;
+            }
+
+            try {
+              frame.contentWindow?.location.reload();
+            } catch {
+              const previous = frame.src;
+              frame.removeAttribute("src");
+              requestAnimationFrame(() => {
+                frame.src = previous;
+              });
+            }
+          });
         }
       });
     }
@@ -1792,7 +1930,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
       render();
     });
 
-    const composer = target.querySelector<HTMLInputElement>("[data-command-input]");
+    const composer = target.querySelector<HTMLTextAreaElement>("[data-command-input]");
     composer?.addEventListener("input", () => {
       uiState = {
         ...uiState,
@@ -1824,6 +1962,9 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
         properties: selectedEditor.properties,
       };
       const response = createInteractiveWebEditResponse(nextRequest, selectedEditor);
+      const model = uiState.selectedModel ?? "gpt-4.1";
+      const userMessageId = `user-${crypto.randomUUID()}`;
+      const assistantMessageId = `assistant-ui-${Date.now()}`;
 
       state = appendEvent(
         {
@@ -1832,10 +1973,17 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
         },
         {
           type: "message.delta",
-          messageId: `assistant-ui-${Date.now()}`,
-          text: `Queued prompt: ${text}`,
+          messageId: userMessageId,
+          text,
+          role: "user",
         },
       );
+      state = appendEvent(state, {
+        type: "message.delta",
+        messageId: assistantMessageId,
+        text: `Queued for ${model}: ${text}`,
+        role: "assistant",
+      });
       uiState = {
         ...uiState,
         composerText: "",
@@ -1846,11 +1994,32 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
 
     target.querySelector<HTMLButtonElement>("[data-send-message]")?.addEventListener("click", sendPrompt);
     composer?.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
+      if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
         sendPrompt();
       }
     });
+
+    target.querySelector<HTMLSelectElement>("[data-model-select]")?.addEventListener("change", (event) => {
+      const nextModel = (event.target as HTMLSelectElement).value;
+      uiState = {
+        ...uiState,
+        selectedModel: nextModel,
+      };
+      try {
+        sessionStorage.setItem("ezuwebs.selectedModel", nextModel);
+      } catch {
+        // Ignore storage access errors.
+      }
+    });
+
+    for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-go-user-dashboard]"))) {
+      button.addEventListener("click", () => {
+        if (location.hash !== "#/user") {
+          location.hash = "#/user";
+        }
+      });
+    }
 
     for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-open-session]"))) {
       button.addEventListener("click", () => {
@@ -1987,6 +2156,13 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
         render();
       });
     }
+
+    requestAnimationFrame(() => {
+      const scroll = target.querySelector<HTMLElement>(".chat-scroll");
+      if (scroll) {
+        scroll.scrollTop = scroll.scrollHeight;
+      }
+    });
   };
 
   render();
@@ -1997,6 +2173,15 @@ async function mount(): Promise<void> {
   clearEphemeralStyles();
   cleanupLauncherEffects?.();
   cleanupLauncherEffects = undefined;
+
+  const hashRoute = window.location.hash.replace(/^#/, "");
+  if (hashRoute === "/user" || hashRoute.startsWith("/user/")) {
+    document.title = "ezuwebs.com | User Center";
+    document.body.innerHTML = renderUserDashboard();
+    attachLauncherStyles();
+    attachUserDashboardListeners(document.body);
+    return;
+  }
 
   const sessionId = getSessionIdFromLocation(window.location);
 

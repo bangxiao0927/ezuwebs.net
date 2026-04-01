@@ -36,6 +36,8 @@ export interface WebAppBootstrap {
   previewCanGoBack?: boolean;
   previewCanGoForward?: boolean;
   previewLoading?: boolean;
+  /** Active model label for the session composer (UI state). */
+  selectedModel?: string;
 }
 
 export type ViewMode = "preview" | "code" | "diff";
@@ -1492,7 +1494,7 @@ export const webAppStyles = `
   .prompt-input {
     margin-top: 12px;
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     gap: 10px;
     padding: 12px 14px;
     border: 1px solid var(--line);
@@ -1501,13 +1503,22 @@ export const webAppStyles = `
     color: var(--dim);
   }
 
-  .prompt-input input {
+  .prompt-input input,
+  .prompt-input textarea {
     flex: 1;
     min-width: 0;
     border: none;
     background: transparent;
     color: var(--text);
     outline: none;
+    font: inherit;
+    line-height: 1.45;
+  }
+
+  .prompt-input textarea {
+    resize: vertical;
+    min-height: 44px;
+    max-height: 200px;
   }
 
   .send-button,
@@ -2043,6 +2054,8 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
   const viewMode: ViewMode = input.viewMode ?? "preview";
   const previewMode: PreviewMode = input.previewMode ?? "runtime";
   const workspaceRoot = input.workspaceRoot ?? ".";
+  const selectedModel = input.selectedModel ?? "gpt-4.1";
+  const modelOptions = ["gpt-4.1", "gpt-4.1-mini", "claude-3.5", "deepseek-r1"] as const;
 
   return `
     <main class="app-shell">
@@ -2060,6 +2073,7 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
             <button class="topbar-button" data-open-dialog="sessions" type="button">Sessions</button>
             <button class="topbar-button" data-open-dialog="share" type="button">Share</button>
             <button class="topbar-button topbar-button-primary" data-open-dialog="publish" type="button">Publish</button>
+            <button class="topbar-button" type="button" data-go-user-dashboard>User</button>
             <div class="avatar">E</div>
           </div>
         </header>
@@ -2074,11 +2088,16 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
               </div>
               <div class="chat-tools">
                 <label class="meta" for="model-select">Model</label>
-                <select id="model-select" class="model-select">
-                  <option value="gpt-4.1">gpt-4.1</option>
-                  <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-                  <option value="claude-3.5">claude-3.5</option>
-                  <option value="deepseek-r1">deepseek-r1</option>
+                <select id="model-select" class="model-select" data-model-select>
+                  ${modelOptions
+                    .map(
+                      (id) => `
+                    <option value="${escapeHtml(id)}" ${id === selectedModel ? "selected" : ""}>${escapeHtml(
+                      id,
+                    )}</option>
+                  `,
+                    )
+                    .join("")}
                 </select>
               </div>
             </div>
@@ -2091,11 +2110,11 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
                 <div class="meta">How can we help you today? (or /command)</div>
                 <div class="prompt-input">
                   <span>+</span>
-                  <input
+                  <textarea
                     data-command-input
-                    value="${escapeHtml(input.composerText ?? "")}"
-                    placeholder="Ask to refine layout, preview, or patch flow"
-                  />
+                    rows="2"
+                    placeholder="Ask to refine layout, preview, or patch flow (Enter send · Shift+Enter newline)"
+                  >${escapeHtml(input.composerText ?? "")}</textarea>
                   <span>${escapeHtml(shell.topBar.runtimeType)}</span>
                   <button class="send-button" data-send-message type="button" aria-label="Send">↑</button>
                 </div>
