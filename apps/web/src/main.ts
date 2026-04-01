@@ -864,6 +864,16 @@ function attachLauncherStyles(): void {
         radial-gradient(circle at top left, rgba(143, 208, 255, 0.2), transparent 28%),
         linear-gradient(180deg, #10192a 0%, #162235 100%);
       color: var(--launcher-text);
+      text-rendering: optimizeLegibility;
+    }
+
+    :where(button, a, input, textarea, select):focus {
+      outline: none;
+    }
+
+    :where(button, a, input, textarea, select):focus-visible {
+      outline: 2px solid rgba(143, 208, 255, 0.55);
+      outline-offset: 3px;
     }
 
     .launcher-shell {
@@ -944,15 +954,15 @@ function attachLauncherStyles(): void {
     .launcher-card p,
     .launcher-meta {
       color: var(--launcher-muted);
-      line-height: 1;
+      line-height: 1.55;
       margin: 0;
     }
 
-  .launcher-meta {
+    .launcher-meta {
       color: var(--launcher-meta);
-      line-height: 0.5;
+      line-height: 1.3;
       margin: 0;
-  }
+    }
     .launcher-actions,
     .launcher-card-meta,
     .launcher-card-head {
@@ -1026,6 +1036,7 @@ function attachLauncherStyles(): void {
       background: var(--launcher-accent);
       border-color: transparent;
       color: #08101d;
+      font-weight: 650;
     }
 
     .launcher-button:hover,
@@ -1036,6 +1047,18 @@ function attachLauncherStyles(): void {
 
     .launcher-button:hover {
       background: rgba(124, 196, 255, 0.12);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .launcher-button,
+      .launcher-card {
+        transition: none;
+      }
+
+      .launcher-button:hover,
+      .launcher-card:hover {
+        transform: none;
+      }
     }
 
     .launcher-meta {

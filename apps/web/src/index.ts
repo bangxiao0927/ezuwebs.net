@@ -834,10 +834,20 @@ export const webAppStyles = `
     --success: #4ade80;
     --danger: #f87171;
     --shadow: 0 28px 90px rgba(0, 0, 0, 0.42);
+    --focus: rgba(124, 196, 255, 0.6);
   }
 
   * {
     box-sizing: border-box;
+  }
+
+  :where(button, a, input, textarea, select):focus {
+    outline: none;
+  }
+
+  :where(button, a, input, textarea, select):focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 3px;
   }
 
   html,
@@ -851,6 +861,7 @@ export const webAppStyles = `
       linear-gradient(180deg, #060816 0%, #09111d 100%);
     color: var(--text);
     font-family: Inter, "Segoe UI", sans-serif;
+    text-rendering: optimizeLegibility;
     overflow: hidden;
   }
 
@@ -947,6 +958,10 @@ export const webAppStyles = `
     background: var(--accent-soft);
   }
 
+  .brand-home:focus-visible {
+    outline-offset: 4px;
+  }
+
   .topbar-title {
     color: var(--text);
     font-weight: 600;
@@ -967,12 +982,30 @@ export const webAppStyles = `
     color: var(--text);
     padding: 8px 12px;
     cursor: pointer;
+    transition:
+      transform 160ms ease,
+      background 160ms ease,
+      border-color 160ms ease;
+  }
+
+  .topbar-button:hover {
+    border-color: var(--line-strong);
+    background: rgba(124, 196, 255, 0.1);
+    transform: translateY(-1px);
+  }
+
+  .topbar-button:active {
+    transform: translateY(0px);
   }
 
   .topbar-button-primary {
     background: #7cc4ff;
     color: #08101d;
-    font-weight: 600;
+    font-weight: 650;
+  }
+
+  .topbar-button-primary:hover {
+    background: #8fd0ff;
   }
 
   .workspace-content {
@@ -1175,6 +1208,15 @@ export const webAppStyles = `
     color: var(--muted);
     cursor: pointer;
     font: inherit;
+    transition:
+      background 160ms ease,
+      border-color 160ms ease,
+      color 160ms ease;
+  }
+
+  .preview-tab:hover {
+    border-color: var(--line-strong);
+    color: var(--text);
   }
 
   .preview-tab-active {
@@ -1757,6 +1799,17 @@ export const webAppStyles = `
   .browser-url:focus {
     border-color: rgba(124, 196, 255, 0.4);
     box-shadow: 0 0 0 3px rgba(124, 196, 255, 0.08);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .topbar-button,
+    .preview-tab {
+      transition: none;
+    }
+
+    .topbar-button:hover {
+      transform: none;
+    }
   }
 
   .browser-loading {
