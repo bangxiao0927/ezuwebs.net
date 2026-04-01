@@ -1546,6 +1546,57 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
       });
     }
 
+    for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-util-action]"))) {
+      button.addEventListener("click", async () => {
+        const action = button.dataset.utilAction;
+        if (!action) {
+          return;
+        }
+
+        const files = buildWorkspaceFiles();
+        const activePath =
+          uiState.activeFile ??
+          state.activeFile ??
+          createWorkbenchViewModel(state).selectedBlockFile ??
+          [...files.keys()][0] ??
+          "apps/web/src/main.ts";
+        const activeContent = files.get(activePath) ?? "";
+
+        if (action === "copy-active-path") {
+          const ok = await copyText(activePath);
+          uiState = { ...uiState, toast: ok ? "Active file path copied." : "Clipboard unavailable in this browser." };
+          render();
+          return;
+        }
+
+        if (action === "copy-active-content") {
+          const ok = await copyText(activeContent);
+          uiState = { ...uiState, toast: ok ? "Active file content copied." : "Clipboard unavailable in this browser." };
+          render();
+          return;
+        }
+
+        if (action === "copy-preview-url") {
+          const candidate = uiState.previewUrl ?? getDefaultPreviewUrl() ?? "";
+          const ok = await copyText(candidate);
+          uiState = { ...uiState, toast: ok ? "Preview URL copied." : "Clipboard unavailable in this browser." };
+          render();
+          return;
+        }
+
+        if (action === "open-preview") {
+          const candidate = uiState.previewUrl ?? getDefaultPreviewUrl();
+          if (candidate) {
+            window.open(candidate, "_blank", "noopener,noreferrer");
+            uiState = { ...uiState, toast: "Preview opened in a new tab." };
+          } else {
+            uiState = { ...uiState, toast: "No preview URL available yet." };
+          }
+          render();
+        }
+      });
+    }
+
     const previewFrame = target.querySelector<HTMLIFrameElement>("[data-preview-frame]");
     const previewUrlInput = target.querySelector<HTMLInputElement>("[data-preview-url-input]");
     const workspacePathInput = target.querySelector<HTMLInputElement>("[data-workspace-path-input]");

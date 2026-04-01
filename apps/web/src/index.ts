@@ -2141,6 +2141,25 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
                 </section>
                 <section class="sidebar-section">
                   <div class="sidebar-section-head">
+                    <strong>Utilities</strong>
+                  </div>
+                  <div class="file-tree">
+                    <button type="button" class="file-entry" data-util-action="copy-active-path">
+                      Copy active file path
+                    </button>
+                    <button type="button" class="file-entry" data-util-action="copy-active-content">
+                      Copy active file content
+                    </button>
+                    <button type="button" class="file-entry" data-util-action="copy-preview-url">
+                      Copy preview URL
+                    </button>
+                    <button type="button" class="file-entry" data-util-action="open-preview">
+                      Open preview in new tab
+                    </button>
+                  </div>
+                </section>
+                <section class="sidebar-section">
+                  <div class="sidebar-section-head">
                     <strong>Code</strong>
                   </div>
                   <div class="code-panel">
