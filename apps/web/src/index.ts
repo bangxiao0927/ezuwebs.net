@@ -749,20 +749,8 @@ function renderSessionPreview(
   `;
 }
 
-function renderSelectedFileCode(filePath: string, content: string): string {
-  return `
-    <div class="stack">
-      <div class="card diff-header">
-        <p class="eyebrow">Selected File</p>
-        <h3>${escapeHtml(filePath)}</h3>
-        <p>Code view for the current file selection.</p>
-      </div>
-      <div class="card code-block">
-        <p class="eyebrow">Source</p>
-        ${renderEditorCode(content)}
-      </div>
-    </div>
-  `;
+function renderSelectedFileCode(_filePath: string, content: string): string {
+  return renderEditorCode(content);
 }
 
 function renderModelOutput(workbench: WorkbenchViewModel): string {
@@ -1051,7 +1039,7 @@ export const webAppStyles = `
 
   .preview-shell {
     display: grid;
-    grid-template-columns: minmax(280px, 0.32fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 0.32fr);
     min-height: 0;
     background: var(--panel-3);
   }
@@ -1060,7 +1048,7 @@ export const webAppStyles = `
     display: grid;
     grid-template-rows: auto 1fr;
     min-height: 0;
-    border-right: 1px solid var(--line);
+    border-left: 1px solid var(--line);
     background: rgba(11, 17, 29, 0.94);
   }
 
@@ -1153,36 +1141,44 @@ export const webAppStyles = `
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    padding: 8px 12px;
+    gap: 8px;
+    padding: 0 12px 0 0;
     border-bottom: 1px solid var(--line);
-    background: rgba(18, 21, 28, 0.96);
+    background: #181a1f;
   }
 
   .preview-topbar strong {
-    font-size: 0.88rem;
-    color: var(--text);
+    margin-left: auto;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .preview-tabs {
     display: flex;
-    gap: 8px;
+    gap: 0;
   }
 
   .preview-tab {
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    padding: 6px 12px;
-    background: rgba(255, 255, 255, 0.03);
+    border: 0;
+    border-right: 1px solid rgba(255, 255, 255, 0.04);
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    padding: 10px 14px 8px;
+    background: transparent;
     color: var(--muted);
     cursor: pointer;
     font: inherit;
+    font-size: 0.8rem;
   }
 
   .preview-tab-active {
-    background: var(--accent-soft);
+    background: rgba(255, 255, 255, 0.03);
     color: var(--text);
-    border-color: rgba(79, 140, 255, 0.5);
+    border-bottom-color: #3794ff;
   }
 
   .preview-body {
@@ -1217,11 +1213,11 @@ export const webAppStyles = `
   }
 
   .preview-panel-review {
-    height: auto;
+    height: 100%;
     overflow: auto;
-    align-content: start;
-    padding: 16px;
-    background: #11161d;
+    align-content: stretch;
+    padding: 0;
+    background: #1e1e1e;
   }
 
   .eyebrow {
@@ -1661,32 +1657,33 @@ export const webAppStyles = `
 
   .code-view {
     display: grid;
-    grid-template-columns: 56px minmax(0, 1fr);
-    min-height: 0;
+    grid-template-columns: 52px minmax(0, 1fr);
+    min-height: 100%;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-    font-size: 0.9rem;
-    line-height: 1.8;
+    font-size: 0.84rem;
+    line-height: 1.6;
+    background: #1e1e1e;
   }
 
   .line-numbers,
   .code-lines {
     margin: 0;
-    padding: 16px 0;
+    padding: 10px 0 16px;
     list-style: none;
   }
 
   .line-numbers {
     text-align: right;
-    padding-right: 14px;
-    color: #5f6b7b;
-    border-right: 1px solid var(--line);
-    background: #11141b;
+    padding-right: 12px;
+    color: #858585;
+    border-right: 1px solid rgba(255, 255, 255, 0.04);
+    background: #1e1e1e;
   }
 
   .code-lines {
-    padding-left: 18px;
-    padding-right: 18px;
-    color: #d7deea;
+    padding-left: 12px;
+    padding-right: 16px;
+    color: #d4d4d4;
   }
 
   .code-line {
@@ -2027,11 +2024,17 @@ export const webAppStyles = `
     .preview-topbar {
       flex-direction: column;
       align-items: flex-start;
+      padding: 0;
     }
 
     .preview-tabs {
       width: 100%;
       flex-wrap: wrap;
+    }
+
+    .preview-topbar strong {
+      margin-left: 0;
+      padding: 0 12px 10px;
     }
   }
 `;
@@ -2123,6 +2126,46 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
           </aside>
 
           <section class="preview-shell">
+            <section class="preview-body">
+              <div class="preview-topbar">
+                <div class="preview-tabs" role="tablist" aria-label="Workbench panel mode">
+                  <button
+                    class="preview-tab ${previewMode === "runtime" ? "preview-tab-active" : ""}"
+                    data-preview-mode="runtime"
+                    type="button"
+                  >
+                    Runtime Preview
+                  </button>
+                  <button
+                    class="preview-tab ${previewMode === "review" ? "preview-tab-active" : ""}"
+                    data-preview-mode="review"
+                    type="button"
+                  >
+                    Code Review
+                  </button>
+                </div>
+                <strong>${escapeHtml(activeFile)}</strong>
+              </div>
+              <div class="preview-panel ${previewMode === "runtime" ? "preview-panel-runtime" : "preview-panel-review"}">
+                ${
+                  previewMode === "runtime"
+                    ? renderSessionPreview(workbench, {
+                        ...(input.previewUrl ? { previewUrl: input.previewUrl } : {}),
+                        ...(input.previewAddress ? { previewAddress: input.previewAddress } : {}),
+                        ...(typeof input.previewCanGoBack === "boolean"
+                          ? { canGoBack: input.previewCanGoBack }
+                          : {}),
+                        ...(typeof input.previewCanGoForward === "boolean"
+                          ? { canGoForward: input.previewCanGoForward }
+                          : {}),
+                        ...(typeof input.previewLoading === "boolean"
+                          ? { loading: input.previewLoading }
+                          : {}),
+                  })
+                    : renderSelectedFileCode(activeFile, activeFileContent)
+                }
+              </div>
+            </section>
             <aside class="workbench-sidebar">
               <div class="workbench-sidebar-header">
                 <form class="workspace-path-form" data-workspace-path-form>
@@ -2187,46 +2230,6 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
                 </section>
               </div>
             </aside>
-            <section class="preview-body">
-              <div class="preview-topbar">
-                <div class="preview-tabs" role="tablist" aria-label="Workbench panel mode">
-                  <button
-                    class="preview-tab ${previewMode === "runtime" ? "preview-tab-active" : ""}"
-                    data-preview-mode="runtime"
-                    type="button"
-                  >
-                    Runtime Preview
-                  </button>
-                  <button
-                    class="preview-tab ${previewMode === "review" ? "preview-tab-active" : ""}"
-                    data-preview-mode="review"
-                    type="button"
-                  >
-                    Code Review
-                  </button>
-                </div>
-                <strong>${escapeHtml(activeFile)}</strong>
-              </div>
-              <div class="preview-panel ${previewMode === "runtime" ? "preview-panel-runtime" : "preview-panel-review"}">
-                ${
-                  previewMode === "runtime"
-                    ? renderSessionPreview(workbench, {
-                        ...(input.previewUrl ? { previewUrl: input.previewUrl } : {}),
-                        ...(input.previewAddress ? { previewAddress: input.previewAddress } : {}),
-                        ...(typeof input.previewCanGoBack === "boolean"
-                          ? { canGoBack: input.previewCanGoBack }
-                          : {}),
-                        ...(typeof input.previewCanGoForward === "boolean"
-                          ? { canGoForward: input.previewCanGoForward }
-                          : {}),
-                        ...(typeof input.previewLoading === "boolean"
-                          ? { loading: input.previewLoading }
-                          : {}),
-                      })
-                    : renderSelectedFileCode(activeFile, activeFileContent)
-                }
-              </div>
-            </section>
           </section>
         </section>
       </div>

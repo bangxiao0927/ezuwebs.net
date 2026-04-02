@@ -1544,6 +1544,15 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
   };
 
   const render = () => {
+    const reviewPanel = target.querySelector<HTMLElement>(".preview-panel-review");
+    const codePanel = target.querySelector<HTMLElement>(".code-panel");
+    const preservedScroll = {
+      reviewTop: reviewPanel?.scrollTop ?? 0,
+      reviewLeft: reviewPanel?.scrollLeft ?? 0,
+      codeTop: codePanel?.scrollTop ?? 0,
+      codeLeft: codePanel?.scrollLeft ?? 0,
+    };
+
     syncActiveFileSelection();
     syncPreviewHistory();
     state = {
@@ -1567,6 +1576,17 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
       selectedModel: uiState.selectedModel ?? "gpt-4.1",
     };
     target.innerHTML = `${renderWebAppBody(renderState)}${renderDialog(state, uiState)}`;
+
+    const nextReviewPanel = target.querySelector<HTMLElement>(".preview-panel-review");
+    const nextCodePanel = target.querySelector<HTMLElement>(".code-panel");
+    if (nextReviewPanel) {
+      nextReviewPanel.scrollTop = preservedScroll.reviewTop;
+      nextReviewPanel.scrollLeft = preservedScroll.reviewLeft;
+    }
+    if (nextCodePanel) {
+      nextCodePanel.scrollTop = preservedScroll.codeTop;
+      nextCodePanel.scrollLeft = preservedScroll.codeLeft;
+    }
 
     for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-block-id]"))) {
       button.addEventListener("click", () => {
