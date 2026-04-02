@@ -25,6 +25,7 @@ type UiState = {
   workspaceRoot?: string;
   activeFile?: string;
   sidebarCollapsed?: boolean;
+  expandedDirectories?: string[];
   viewMode: ViewMode;
   previewMode: PreviewMode;
   previewUrl?: string;
@@ -38,6 +39,21 @@ type PreviewHistoryState = {
   entries: string[];
   index: number;
 };
+
+function getAncestorDirectories(filePath: string): string[] {
+  const segments = filePath.split("/").filter(Boolean);
+  const directories: string[] = [];
+
+  for (let index = 0; index < Math.max(0, segments.length - 1); index += 1) {
+    directories.push(segments.slice(0, index + 1).join("/"));
+  }
+
+  return directories;
+}
+
+function includeFileAncestors(expandedDirectories: string[] | undefined, filePath: string): string[] {
+  return [...new Set([...(expandedDirectories ?? []), ...getAncestorDirectories(filePath)])];
+}
 
 const THREADS_VERTEX_SHADER = `
 attribute vec2 position;
@@ -1544,10 +1560,13 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
     };
   };
 
-  const render = () => {
+  const render = (options: { preserveRuntimePreview?: boolean } = {}) => {
     const sidebarBody = target.querySelector<HTMLElement>(".workbench-sidebar-body");
     const reviewPanel = target.querySelector<HTMLElement>(".preview-panel-review");
     const codePanel = target.querySelector<HTMLElement>(".code-panel");
+    const runtimeBrowserFrame = options.preserveRuntimePreview
+      ? target.querySelector<HTMLElement>(".preview-panel-runtime .browser-frame")
+      : null;
     const preservedScroll = {
       sidebarTop: sidebarBody?.scrollTop ?? 0,
       sidebarLeft: sidebarBody?.scrollLeft ?? 0,
@@ -1578,6 +1597,7 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
       ...(typeof uiState.sidebarCollapsed === "boolean"
         ? { sidebarCollapsed: uiState.sidebarCollapsed }
         : {}),
+      ...(uiState.expandedDirectories ? { expandedDirectories: uiState.expandedDirectories } : {}),
       previewCanGoBack: previewHistory.index > 0,
       previewCanGoForward: previewHistory.index >= 0 && previewHistory.index < previewHistory.entries.length - 1,
       selectedModel: uiState.selectedModel ?? "gpt-4.1",
@@ -1585,8 +1605,17 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
     target.innerHTML = `${renderWebAppBody(renderState)}${renderDialog(state, uiState)}`;
 
     const nextSidebarBody = target.querySelector<HTMLElement>(".workbench-sidebar-body");
+    const nextRuntimePanel = target.querySelector<HTMLElement>(".preview-panel-runtime");
     const nextReviewPanel = target.querySelector<HTMLElement>(".preview-panel-review");
     const nextCodePanel = target.querySelector<HTMLElement>(".code-panel");
+    if (
+      options.preserveRuntimePreview &&
+      runtimeBrowserFrame &&
+      nextRuntimePanel &&
+      renderState.previewMode === "runtime"
+    ) {
+      nextRuntimePanel.replaceChildren(runtimeBrowserFrame);
+    }
     if (nextSidebarBody) {
       nextSidebarBody.scrollTop = preservedScroll.sidebarTop;
       nextSidebarBody.scrollLeft = preservedScroll.sidebarLeft;
@@ -1639,9 +1668,10 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
           uiState = {
             ...uiState,
             activeFile: filePath,
+            expandedDirectories: includeFileAncestors(uiState.expandedDirectories, filePath),
           };
         }
-        render();
+        render({ preserveRuntimePreview: true });
       });
     }
 
@@ -1685,6 +1715,41 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
       render();
     });
 
+    for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-directory-path]"))) {
+      button.addEventListener("click", () => {
+        const directoryPath = button.dataset.directoryPath;
+
+        if (!directoryPath) {
+          return;
+        }
+
+        const expanded = new Set(uiState.expandedDirectories ?? []);
+        if (expanded.has(directoryPath)) {
+          expanded.delete(directoryPath);
+        } else {
+          expanded.add(directoryPath);
+        }
+
+        uiState = {
+          ...uiState,
+          expandedDirectories: [...expanded],
+        };
+
+        const treeGroup = button.closest<HTMLElement>(".tree-group");
+        const children = treeGroup?.querySelector<HTMLElement>(".tree-group-children");
+        const caret = button.querySelector<HTMLElement>(".tree-group-caret");
+        const isExpanded = expanded.has(directoryPath);
+
+        button.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+        if (caret) {
+          caret.textContent = isExpanded ? "▾" : "▸";
+        }
+        if (children) {
+          children.classList.toggle("tree-group-children-collapsed", !isExpanded);
+        }
+      });
+    }
+
     for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-file-path]"))) {
       button.addEventListener("click", () => {
         if (button.dataset.diffActionId) {
@@ -1699,8 +1764,9 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
         uiState = {
           ...uiState,
           activeFile: filePath,
+          expandedDirectories: includeFileAncestors(uiState.expandedDirectories, filePath),
         };
-        render();
+        render({ preserveRuntimePreview: true });
       });
     }
 

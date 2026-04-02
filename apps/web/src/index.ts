@@ -37,6 +37,7 @@ export interface WebAppBootstrap {
   previewCanGoForward?: boolean;
   previewLoading?: boolean;
   sidebarCollapsed?: boolean;
+  expandedDirectories?: string[];
   /** Active model label for the session composer (UI state). */
   selectedModel?: string;
 }
@@ -750,6 +751,142 @@ function renderSessionPreview(
   `;
 }
 
+type FileTreeNode = {
+  name: string;
+  path: string;
+  children: Map<string, FileTreeNode>;
+  isFile: boolean;
+};
+
+type FileTreeRenderState = {
+  activeFile: string;
+  expandedDirectories: Set<string>;
+};
+
+function createFileTree(paths: string[]): FileTreeNode {
+  const root: FileTreeNode = {
+    name: "",
+    path: "",
+    children: new Map(),
+    isFile: false,
+  };
+
+  for (const filePath of paths) {
+    const segments = filePath.split("/").filter(Boolean);
+    let current = root;
+
+    for (let index = 0; index < segments.length; index += 1) {
+      const segment = segments[index]!;
+      const nextPath = current.path ? `${current.path}/${segment}` : segment;
+      const isFile = index === segments.length - 1;
+      const existing = current.children.get(segment);
+
+      if (existing) {
+        if (isFile) {
+          existing.isFile = true;
+        }
+        current = existing;
+        continue;
+      }
+
+      const node: FileTreeNode = {
+        name: segment,
+        path: nextPath,
+        children: new Map(),
+        isFile,
+      };
+      current.children.set(segment, node);
+      current = node;
+    }
+  }
+
+  return root;
+}
+
+function sortFileTreeNodes(nodes: FileTreeNode[]): FileTreeNode[] {
+  return [...nodes].sort((left, right) => {
+    if (left.isFile !== right.isFile) {
+      return left.isFile ? 1 : -1;
+    }
+    return left.name.localeCompare(right.name);
+  });
+}
+
+function getAncestorDirectories(filePath: string): string[] {
+  const segments = filePath.split("/").filter(Boolean);
+  const directories: string[] = [];
+
+  for (let index = 0; index < Math.max(0, segments.length - 1); index += 1) {
+    directories.push(segments.slice(0, index + 1).join("/"));
+  }
+
+  return directories;
+}
+
+function normalizeExpandedDirectories(
+  activeFile: string,
+  expandedDirectories?: Iterable<string>,
+): Set<string> {
+  if (expandedDirectories) {
+    return new Set(expandedDirectories);
+  }
+
+  return new Set(getAncestorDirectories(activeFile));
+}
+
+function renderFileTreeNodes(nodes: FileTreeNode[], state: FileTreeRenderState, depth = 0): string {
+  return sortFileTreeNodes(nodes)
+    .map((node) => {
+      if (node.isFile) {
+        return `
+          <button
+            type="button"
+            class="file-entry ${node.path === state.activeFile ? "file-entry-active" : ""}"
+            data-file-path="${escapeHtml(node.path)}"
+            style="--tree-depth:${String(depth)}"
+            title="${escapeHtml(node.path)}"
+          >
+            <span class="file-entry-icon">≡</span>
+            <span class="file-entry-label">${escapeHtml(node.name)}</span>
+          </button>
+        `;
+      }
+
+      const isExpanded = state.expandedDirectories.has(node.path);
+
+      return `
+        <div class="tree-group" style="--tree-depth:${String(depth)}" data-tree-path="${escapeHtml(node.path)}">
+          <button
+            type="button"
+            class="tree-group-label"
+            data-directory-path="${escapeHtml(node.path)}"
+            aria-expanded="${isExpanded ? "true" : "false"}"
+            title="${escapeHtml(node.path)}"
+          >
+            <span class="tree-group-caret">${isExpanded ? "▾" : "▸"}</span>
+            <span class="tree-group-name">${escapeHtml(node.name)}</span>
+          </button>
+          <div class="tree-group-children ${isExpanded ? "" : "tree-group-children-collapsed"}">
+            ${renderFileTreeNodes([...node.children.values()], state, depth + 1)}
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderWorkspaceFileTree(
+  paths: string[],
+  activeFile: string,
+  expandedDirectories?: Iterable<string>,
+): string {
+  const root = createFileTree(paths);
+  return renderFileTreeNodes([...root.children.values()], {
+    activeFile,
+    expandedDirectories: normalizeExpandedDirectories(activeFile, expandedDirectories),
+  });
+}
+
 function renderSelectedFileCode(_filePath: string, content: string): string {
   return renderEditorCode(content);
 }
@@ -1131,17 +1268,67 @@ export const webAppStyles = `
     padding: 4px 0 8px;
   }
 
+  .tree-group {
+    display: grid;
+  }
+
+  .tree-group-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 24px;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    padding: 0 12px;
+    padding-left: calc(12px + var(--tree-depth, 0) * 14px);
+    color: #cccccc;
+    font-size: 0.78rem;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tree-group-label:hover {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .tree-group-caret {
+    color: #8c8c8c;
+    font-size: 0.72rem;
+    flex: 0 0 auto;
+  }
+
+  .tree-group-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tree-group-children {
+    display: grid;
+  }
+
+  .tree-group-children-collapsed {
+    display: none;
+  }
+
   .file-entry {
     width: 100%;
     text-align: left;
     border: 0;
     border-radius: 0;
-    padding: 4px 12px 4px 16px;
+    padding: 4px 12px;
+    padding-left: calc(16px + var(--tree-depth, 0) * 14px);
     background: transparent;
     color: #cccccc;
     cursor: pointer;
     font-size: 0.78rem;
     line-height: 1.5;
+    display: flex;
+    align-items: center;
+    gap: 6px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1154,6 +1341,17 @@ export const webAppStyles = `
   .file-entry-active {
     background: #37373d;
     color: #ffffff;
+  }
+
+  .file-entry-icon {
+    color: #8c8c8c;
+    flex: 0 0 auto;
+    font-size: 0.7rem;
+  }
+
+  .file-entry-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .preview-topbar {
@@ -2123,6 +2321,7 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
   const viewMode: ViewMode = input.viewMode ?? "preview";
   const previewMode: PreviewMode = input.previewMode ?? "runtime";
   const sidebarCollapsed = input.sidebarCollapsed ?? false;
+  const expandedDirectories = input.expandedDirectories;
   const workspaceRoot = input.workspaceRoot ?? ".";
   const selectedModel = input.selectedModel ?? "gpt-4.1";
   const modelOptions = ["gpt-4.1", "gpt-4.1-mini", "claude-3.5", "deepseek-r1"] as const;
@@ -2268,19 +2467,7 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
                     <strong>${escapeHtml(workspaceRoot)}</strong>
                   </div>
                   <div class="file-tree">
-                    ${uniqueFiles
-                      .map(
-                        (filePath) => `
-                          <button
-                            type="button"
-                            class="file-entry ${filePath === activeFile ? "file-entry-active" : ""}"
-                            data-file-path="${escapeHtml(filePath)}"
-                          >
-                            ${escapeHtml(filePath)}
-                          </button>
-                        `,
-                      )
-                      .join("")}
+                    ${renderWorkspaceFileTree(uniqueFiles, activeFile, expandedDirectories)}
                   </div>
                 </section>
                 <section class="sidebar-section">
