@@ -36,6 +36,7 @@ export interface WebAppBootstrap {
   previewCanGoBack?: boolean;
   previewCanGoForward?: boolean;
   previewLoading?: boolean;
+  sidebarCollapsed?: boolean;
   /** Active model label for the session composer (UI state). */
   selectedModel?: string;
 }
@@ -1050,6 +1051,12 @@ export const webAppStyles = `
     min-height: 0;
     border-left: 1px solid var(--line);
     background: rgba(11, 17, 29, 0.94);
+    min-width: 0;
+    overflow: hidden;
+    transition:
+      border-color 180ms ease,
+      background 180ms ease,
+      opacity 180ms ease;
   }
 
   .workbench-sidebar-header {
@@ -1157,6 +1164,31 @@ export const webAppStyles = `
     text-overflow: ellipsis;
   }
 
+  .preview-topbar-actions {
+    margin-left: auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .sidebar-toggle {
+    border: 0;
+    border-left: 1px solid rgba(255, 255, 255, 0.04);
+    padding: 10px 12px 8px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+
+  .sidebar-toggle:hover {
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.03);
+  }
+
   .preview-tabs {
     display: flex;
     gap: 0;
@@ -1196,6 +1228,21 @@ export const webAppStyles = `
   .workspace-shell[data-view-mode="preview"] .preview-panel,
   .workspace-shell[data-view-mode="code"] .code-panel {
     display: grid;
+  }
+
+  .workspace-shell[data-sidebar-collapsed="true"] .preview-shell {
+    grid-template-columns: minmax(0, 1fr) 0;
+  }
+
+  .workspace-shell[data-sidebar-collapsed="true"] .workbench-sidebar {
+    border-left-color: transparent;
+    background: transparent;
+    opacity: 0;
+  }
+
+  .workspace-shell[data-sidebar-collapsed="true"] .workbench-sidebar-header,
+  .workspace-shell[data-sidebar-collapsed="true"] .workbench-sidebar-body {
+    visibility: hidden;
   }
 
   .preview-panel,
@@ -1985,7 +2032,7 @@ export const webAppStyles = `
     }
 
     .workbench-sidebar {
-      border-right: 0;
+      border-left: 0;
       border-bottom: 1px solid var(--line);
     }
 
@@ -2032,9 +2079,16 @@ export const webAppStyles = `
       flex-wrap: wrap;
     }
 
-    .preview-topbar strong {
+    .preview-topbar-actions {
       margin-left: 0;
+      width: 100%;
+      justify-content: space-between;
       padding: 0 12px 10px;
+    }
+
+    .sidebar-toggle {
+      border-left: 0;
+      padding: 0;
     }
   }
 `;
@@ -2056,13 +2110,18 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
     `// ${activeFile}\n\nNo file content is available for this workspace path yet.`;
   const viewMode: ViewMode = input.viewMode ?? "preview";
   const previewMode: PreviewMode = input.previewMode ?? "runtime";
+  const sidebarCollapsed = input.sidebarCollapsed ?? false;
   const workspaceRoot = input.workspaceRoot ?? ".";
   const selectedModel = input.selectedModel ?? "gpt-4.1";
   const modelOptions = ["gpt-4.1", "gpt-4.1-mini", "claude-3.5", "deepseek-r1"] as const;
 
   return `
     <main class="app-shell">
-      <div class="workspace-shell" data-view-mode="${escapeHtml(viewMode)}">
+      <div
+        class="workspace-shell"
+        data-view-mode="${escapeHtml(viewMode)}"
+        data-sidebar-collapsed="${sidebarCollapsed ? "true" : "false"}"
+      >
         <header class="workspace-topbar">
           <div class="topbar-left">
             <button class="brand-mark brand-home" data-go-home type="button" aria-label="Back to homepage">EZ</button>
@@ -2144,7 +2203,17 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
                     Code Review
                   </button>
                 </div>
-                <strong>${escapeHtml(activeFile)}</strong>
+                <div class="preview-topbar-actions">
+                  <strong>${escapeHtml(activeFile)}</strong>
+                  <button
+                    class="sidebar-toggle"
+                    data-sidebar-toggle
+                    type="button"
+                    aria-expanded="${sidebarCollapsed ? "false" : "true"}"
+                  >
+                    ${sidebarCollapsed ? "Show Sidebar" : "Hide Sidebar"}
+                  </button>
+                </div>
               </div>
               <div class="preview-panel ${previewMode === "runtime" ? "preview-panel-runtime" : "preview-panel-review"}">
                 ${

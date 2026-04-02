@@ -24,6 +24,7 @@ type UiState = {
   composerText: string;
   workspaceRoot?: string;
   activeFile?: string;
+  sidebarCollapsed?: boolean;
   viewMode: ViewMode;
   previewMode: PreviewMode;
   previewUrl?: string;
@@ -1571,6 +1572,9 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
       ...(typeof uiState.previewLoading === "boolean"
         ? { previewLoading: uiState.previewLoading }
         : {}),
+      ...(typeof uiState.sidebarCollapsed === "boolean"
+        ? { sidebarCollapsed: uiState.sidebarCollapsed }
+        : {}),
       previewCanGoBack: previewHistory.index > 0,
       previewCanGoForward: previewHistory.index >= 0 && previewHistory.index < previewHistory.entries.length - 1,
       selectedModel: uiState.selectedModel ?? "gpt-4.1",
@@ -1664,6 +1668,14 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
         render();
       });
     }
+
+    target.querySelector<HTMLButtonElement>("[data-sidebar-toggle]")?.addEventListener("click", () => {
+      uiState = {
+        ...uiState,
+        sidebarCollapsed: !uiState.sidebarCollapsed,
+      };
+      render();
+    });
 
     for (const button of Array.from(target.querySelectorAll<HTMLButtonElement>("[data-file-path]"))) {
       button.addEventListener("click", () => {
