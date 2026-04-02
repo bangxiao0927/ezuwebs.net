@@ -2448,7 +2448,6 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
             </section>
             <aside class="workbench-sidebar">
               <div class="workbench-sidebar-header">
-                <p class="eyebrow">Explorer</p>
                 <form class="workspace-path-form" data-workspace-path-form>
                   <p class="eyebrow">Workspace</p>
                   <input
