@@ -1545,9 +1545,12 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
   };
 
   const render = () => {
+    const sidebarBody = target.querySelector<HTMLElement>(".workbench-sidebar-body");
     const reviewPanel = target.querySelector<HTMLElement>(".preview-panel-review");
     const codePanel = target.querySelector<HTMLElement>(".code-panel");
     const preservedScroll = {
+      sidebarTop: sidebarBody?.scrollTop ?? 0,
+      sidebarLeft: sidebarBody?.scrollLeft ?? 0,
       reviewTop: reviewPanel?.scrollTop ?? 0,
       reviewLeft: reviewPanel?.scrollLeft ?? 0,
       codeTop: codePanel?.scrollTop ?? 0,
@@ -1581,8 +1584,13 @@ async function mountSessionApp(target: HTMLElement, sessionId: string): Promise<
     };
     target.innerHTML = `${renderWebAppBody(renderState)}${renderDialog(state, uiState)}`;
 
+    const nextSidebarBody = target.querySelector<HTMLElement>(".workbench-sidebar-body");
     const nextReviewPanel = target.querySelector<HTMLElement>(".preview-panel-review");
     const nextCodePanel = target.querySelector<HTMLElement>(".code-panel");
+    if (nextSidebarBody) {
+      nextSidebarBody.scrollTop = preservedScroll.sidebarTop;
+      nextSidebarBody.scrollLeft = preservedScroll.sidebarLeft;
+    }
     if (nextReviewPanel) {
       nextReviewPanel.scrollTop = preservedScroll.reviewTop;
       nextReviewPanel.scrollLeft = preservedScroll.reviewLeft;

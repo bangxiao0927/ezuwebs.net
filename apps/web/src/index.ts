@@ -1050,7 +1050,7 @@ export const webAppStyles = `
     grid-template-rows: auto 1fr;
     min-height: 0;
     border-left: 1px solid var(--line);
-    background: rgba(11, 17, 29, 0.94);
+    background: #181818;
     min-width: 0;
     overflow: hidden;
     transition:
@@ -1060,15 +1060,15 @@ export const webAppStyles = `
   }
 
   .workbench-sidebar-header {
-    padding: 10px 12px 8px;
+    padding: 8px 12px 10px;
     border-bottom: 1px solid var(--line);
     display: grid;
-    gap: 8px;
+    gap: 6px;
   }
 
   .workspace-path-form {
     display: grid;
-    gap: 6px;
+    gap: 4px;
     min-width: 0;
   }
 
@@ -1076,13 +1076,13 @@ export const webAppStyles = `
     width: 100%;
     min-width: 0;
     border: 0;
-    border-radius: 8px;
+    border-radius: 4px;
     padding: 6px 8px;
-    color: var(--text);
-    background: rgba(255, 255, 255, 0.03);
-    font-size: 0.86rem;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    color: #cccccc;
+    background: #252526;
+    font-size: 0.78rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-weight: 500;
     outline: none;
   }
 
@@ -1091,20 +1091,19 @@ export const webAppStyles = `
   }
 
   .workspace-path-input:focus {
-    background: rgba(124, 196, 255, 0.08);
-    box-shadow: inset 0 0 0 1px rgba(124, 196, 255, 0.28);
+    box-shadow: inset 0 0 0 1px #007acc;
   }
 
   .workbench-sidebar-body {
-    padding: 10px 8px;
+    padding: 0;
     overflow: auto;
     display: grid;
-    gap: 12px;
+    gap: 0;
   }
 
   .sidebar-section {
     display: grid;
-    gap: 10px;
+    gap: 0;
   }
 
   .sidebar-section-head {
@@ -1112,36 +1111,49 @@ export const webAppStyles = `
     align-items: center;
     justify-content: space-between;
     gap: 10px;
+    min-height: 30px;
+    padding: 0 12px;
+    background: #181818;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
   }
 
   .sidebar-section-head strong {
-    color: var(--text);
-    font-size: 0.78rem;
+    color: #cccccc;
+    font-size: 0.72rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
+    font-weight: 700;
   }
 
   .file-tree {
     display: grid;
-    gap: 2px;
+    gap: 0;
+    padding: 4px 0 8px;
   }
 
   .file-entry {
     width: 100%;
     text-align: left;
     border: 0;
-    border-radius: 8px;
-    padding: 6px 8px;
+    border-radius: 0;
+    padding: 4px 12px 4px 16px;
     background: transparent;
-    color: var(--muted);
+    color: #cccccc;
     cursor: pointer;
-    font-size: 0.86rem;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  .file-entry:hover,
+  .file-entry:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
   .file-entry-active {
-    background: rgba(124, 196, 255, 0.08);
-    color: var(--text);
+    background: #37373d;
+    color: #ffffff;
   }
 
   .preview-topbar {
@@ -2237,8 +2249,9 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
             </section>
             <aside class="workbench-sidebar">
               <div class="workbench-sidebar-header">
+                <p class="eyebrow">Explorer</p>
                 <form class="workspace-path-form" data-workspace-path-form>
-                  <p class="eyebrow">Workspace Path</p>
+                  <p class="eyebrow">Workspace</p>
                   <input
                     class="workspace-path-input"
                     data-workspace-path-input
@@ -2252,7 +2265,7 @@ export function renderWebAppBody(input: WebAppBootstrap): string {
               <div class="workbench-sidebar-body">
                 <section class="sidebar-section">
                   <div class="sidebar-section-head">
-                    <strong>Filesystem</strong>
+                    <strong>${escapeHtml(workspaceRoot)}</strong>
                   </div>
                   <div class="file-tree">
                     ${uniqueFiles
